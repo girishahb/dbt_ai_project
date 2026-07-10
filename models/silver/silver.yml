@@ -1,0 +1,80 @@
+version: 2
+
+models:
+  - name: silver_customers
+    description: "Cleaned, deduplicated customer dimension."
+    columns:
+      - name: customer_id
+        data_tests:
+          - unique
+          - not_null
+      - name: gender
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Female', 'Male', 'Unknown']
+
+  - name: silver_franchises
+    description: "Cleaned franchise (bakery location) dimension."
+    columns:
+      - name: franchise_id
+        data_tests:
+          - unique
+          - not_null
+      - name: supplier_id
+        data_tests:
+          # Known data quality gap in the source data: 21 of 48 franchises
+          # reference supplierIDs that don't exist in sales_suppliers.
+          # Warn (don't fail the build) so it's monitored, not blocking.
+          - relationships:
+              arguments:
+                to: ref('silver_suppliers')
+                field: supplier_id
+              config:
+                severity: warn
+
+  - name: silver_suppliers
+    description: "Cleaned ingredient supplier dimension."
+    columns:
+      - name: supplier_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: silver_transactions
+    description: "Cleaned, validated sales transaction fact. Card numbers are masked; rows with non-positive quantity are dropped."
+    columns:
+      - name: transaction_id
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('silver_customers')
+                field: customer_id
+      - name: franchise_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('silver_franchises')
+                field: franchise_id
+      - name: has_price_mismatch
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [true, false]
+
+  - name: silver_customer_reviews
+    description: "Cleaned customer reviews with a star rating parsed out of free text where present."
+    columns:
+      - name: review_id
+        data_tests:
+          - unique
+          - not_null
+      - name: sentiment_bucket
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Positive', 'Neutral', 'Negative', 'Unrated']

@@ -1,0 +1,20 @@
+dbt_ai_project:
+  target: prod
+  outputs:
+    dev:
+      type: databricks
+      catalog: "{{ env_var('DBT_DATABRICKS_CATALOG', 'hive_metastore') }}"
+      schema: "{{ env_var('DBT_DATABRICKS_SCHEMA', 'dbt_ai_project_dev') }}"
+      host: "{{ env_var('DBT_DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DBT_DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DBT_DATABRICKS_TOKEN') }}"
+      threads: 4
+
+    prod:
+      type: databricks
+      catalog: "{{ env_var('DBT_DATABRICKS_CATALOG', 'hive_metastore') }}"
+      schema: "{{ env_var('DBT_DATABRICKS_SCHEMA', 'dbt_ai_project') }}"
+      host: "{{ env_var('DBT_DATABRICKS_HOST') }}"
+      http_path: "{{ env_var('DBT_DATABRICKS_HTTP_PATH') }}"
+      token: "{{ env_var('DBT_DATABRICKS_TOKEN') }}"
+      threads: 8

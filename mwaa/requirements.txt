@@ -1,0 +1,12 @@
+# MWAA environment requirements.txt (installed into Airflow's own Python
+# environment -- NOT where dbt lives, see startup.sh).
+#
+# The dbt_silver / dbt_gold DAGs only use core Airflow (BashOperator,
+# TriggerDagRunOperator, Variable), all bundled with every MWAA environment,
+# so no additional packages are required today. Keep this file present
+# (even empty) since MWAA expects a requirements.txt to be configured.
+#
+# If you back Airflow Variables/Connections with AWS Secrets Manager
+# (recommended for the dbt_databricks_* credentials), that support is
+# provided by apache-airflow-providers-amazon, which MWAA already bundles
+# by default -- no need to add it here.

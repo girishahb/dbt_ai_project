@@ -1,0 +1,20 @@
+version: 2
+
+sources:
+  - name: bakehouse
+    description: "Raw (bronze) tables landed in the Bakehouse demo catalog/schema."
+    database: ai_project
+    schema: default
+    tables:
+      - name: sales_customers
+        description: "One row per customer."
+      - name: sales_franchises
+        description: "One row per franchise (bakery location)."
+      - name: sales_suppliers
+        description: "One row per ingredient supplier."
+      - name: sales_transactions
+        description: "One row per line-item sale transaction."
+      - name: media_customer_reviews
+        description: "Free-text customer reviews per franchise."
+      - name: media_gold_reviews_chunked
+        description: "Pre-chunked review text prepared for RAG/vector search. Not used by the sales medallion pipeline."

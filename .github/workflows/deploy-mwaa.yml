@@ -1,0 +1,99 @@
+name: Deploy to MWAA
+
+# Syncs the dbt project + Airflow DAGs to the MWAA S3 bucket on every push to
+# main. The DAGs folder (models/macros/seeds/.../dags/) is picked up by MWAA
+# automatically within ~1 minute of landing in S3 -- no extra step needed.
+#
+# requirements.txt and startup.sh are different: MWAA pins a specific S3
+# object *version* for each in the environment config, so uploading a new
+# copy alone doesn't take effect. When either file changes, this workflow
+# also looks up the new version ID and calls `aws mwaa update-environment`
+# to point the environment at it (which briefly restarts the environment).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "dags/**"
+      - "models/**"
+      - "macros/**"
+      - "seeds/**"
+      - "snapshots/**"
+      - "analyses/**"
+      - "tests/**"
+      - "profiles/**"
+      - "dbt_project.yml"
+      - "mwaa/**"
+
+permissions:
+  id-token: write # required to mint the OIDC token for AssumeRoleWithWebIdentity
+  contents: read
+
+concurrency:
+  group: deploy-mwaa
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Sync dbt project + DAGs to S3
+        run: |
+          set -euo pipefail
+          BUCKET="${{ vars.S3_BUCKET }}"
+
+          aws s3 cp dbt_project.yml "s3://${BUCKET}/dags/dbt_project.yml"
+          aws s3 sync models/ "s3://${BUCKET}/dags/models/" --delete
+          aws s3 sync macros/ "s3://${BUCKET}/dags/macros/" --delete
+          aws s3 sync seeds/ "s3://${BUCKET}/dags/seeds/" --delete
+          aws s3 sync snapshots/ "s3://${BUCKET}/dags/snapshots/" --delete
+          aws s3 sync analyses/ "s3://${BUCKET}/dags/analyses/" --delete
+          aws s3 sync tests/ "s3://${BUCKET}/dags/tests/" --delete
+          aws s3 sync profiles/ "s3://${BUCKET}/dags/profiles/" --delete
+          aws s3 sync dags/ "s3://${BUCKET}/dags/dags/" --delete --exclude "__pycache__/*"
+
+      - name: Detect requirements.txt / startup.sh changes
+        id: mwaa_config
+        run: |
+          set -euo pipefail
+          BEFORE="${{ github.event.before }}"
+          AFTER="${{ github.sha }}"
+
+          if [ -z "${BEFORE}" ] || [ "${BEFORE}" = "0000000000000000000000000000000000000000" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif git diff --name-only "${BEFORE}" "${AFTER}" | grep -qE '^mwaa/(requirements\.txt|startup\.sh)$'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload requirements.txt / startup.sh and re-point MWAA at the new versions
+        if: steps.mwaa_config.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          BUCKET="${{ vars.S3_BUCKET }}"
+
+          aws s3 cp mwaa/requirements.txt "s3://${BUCKET}/requirements.txt"
+          aws s3 cp mwaa/startup.sh "s3://${BUCKET}/startup.sh"
+
+          REQ_VERSION=$(aws s3api head-object --bucket "${BUCKET}" --key requirements.txt --query VersionId --output text)
+          STARTUP_VERSION=$(aws s3api head-object --bucket "${BUCKET}" --key startup.sh --query VersionId --output text)
+
+          echo "New requirements.txt version: ${REQ_VERSION}"
+          echo "New startup.sh version: ${STARTUP_VERSION}"
+
+          aws mwaa update-environment \
+            --name "${{ vars.MWAA_ENV_NAME }}" \
+            --requirements-s3-object-version "${REQ_VERSION}" \
+            --startup-script-s3-object-version "${STARTUP_VERSION}"

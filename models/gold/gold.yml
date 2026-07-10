@@ -1,0 +1,92 @@
+version: 2
+
+models:
+  - name: gold_dim_customers
+    description: "Customer dimension for BI consumption."
+    columns:
+      - name: customer_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: gold_dim_suppliers
+    description: "Supplier dimension for BI consumption."
+    columns:
+      - name: supplier_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: gold_dim_franchises
+    description: "Franchise dimension denormalized with its primary supplier."
+    columns:
+      - name: franchise_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: gold_fact_sales
+    description: "Transaction-grain sales fact table enriched with customer and franchise attributes."
+    columns:
+      - name: transaction_id
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('gold_dim_customers')
+                field: customer_id
+      - name: franchise_id
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('gold_dim_franchises')
+                field: franchise_id
+
+  - name: gold_franchise_performance
+    description: "Monthly revenue, volume, and order economics per franchise, with each franchise's top product for the month."
+    columns:
+      - name: franchise_id
+        data_tests:
+          - not_null
+
+  - name: gold_customer_ltv
+    description: "Customer lifetime value, recency status, and value segment for retention/marketing use cases."
+    columns:
+      - name: customer_id
+        data_tests:
+          - unique
+          - not_null
+      - name: customer_status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Active', 'At Risk', 'Churned']
+      - name: value_segment
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['High Value', 'Medium Value', 'Low Value']
+
+  - name: gold_product_performance
+    description: "Chain-wide sales performance and revenue mix by product."
+    columns:
+      - name: product
+        data_tests:
+          - unique
+          - not_null
+
+  - name: gold_review_sentiment
+    description: "Franchise reputation scorecard blending parsed star ratings and sentiment mix from customer reviews."
+    columns:
+      - name: franchise_id
+        data_tests:
+          - unique
+          - not_null
+      - name: reputation_tier
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['Strong Reputation', 'Mixed Reputation', 'Poor Reputation', 'No Reviews']
