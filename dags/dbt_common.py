@@ -51,16 +51,25 @@ _DBT_CREDENTIAL_VARS = {
 
 
 def get_dbt_env() -> dict:
-    """Build the environment for a dbt subprocess call.
+    """Build the *additional* environment variables for a dbt subprocess call.
 
-    Starts from the current process environment (so PATH, HOME, etc. are
-    preserved for BashOperator) and overlays Databricks connection details
-    pulled from Airflow Variables, falling back to any same-named value
-    already in the environment for local runs.
+    Deliberately returns only the handful of DBT_* credential vars, not a
+    copy of the full os.environ. `env` is a templated field on BashOperator,
+    and Airflow/Jinja treats any templated string value ending in ".sh" or
+    ".bash" as a path to a template *file* to load rather than a literal
+    string -- MWAA's own environment includes vars like
+    MWAA__CORE__STARTUP_SCRIPT_PATH=/usr/local/airflow/startup/startup.sh,
+    so merging the full environment here causes a
+    `TemplateNotFound: '.../startup.sh' not found in search path` error at
+    task render time.
+
+    Use this together with `append_env=True` on BashOperator: Airflow then
+    inherits the full parent environment at *execution* time (unrendered)
+    and only overlays these few keys on top.
     """
-    env = os.environ.copy()
+    env = {}
     for env_var, airflow_var in _DBT_CREDENTIAL_VARS.items():
-        env[env_var] = Variable.get(airflow_var, default_var=env.get(env_var, ""))
+        env[env_var] = Variable.get(airflow_var, default_var=os.environ.get(env_var, ""))
     return env
 
 

@@ -37,12 +37,14 @@ with DAG(
         task_id="dbt_run_gold",
         bash_command=f"{DBT_CMD_PREFIX} run --select gold --target {DBT_TARGET}",
         env=get_dbt_env(),
+        append_env=True,
     )
 
     dbt_test_gold = BashOperator(
         task_id="dbt_test_gold",
         bash_command=f"{DBT_CMD_PREFIX} test --select gold --target {DBT_TARGET}",
         env=get_dbt_env(),
+        append_env=True,
     )
 
     dbt_run_gold >> dbt_test_gold

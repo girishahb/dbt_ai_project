@@ -37,12 +37,14 @@ with DAG(
         task_id="dbt_run_silver",
         bash_command=f"{DBT_CMD_PREFIX} run --select silver --target {DBT_TARGET}",
         env=get_dbt_env(),
+        append_env=True,
     )
 
     dbt_test_silver = BashOperator(
         task_id="dbt_test_silver",
         bash_command=f"{DBT_CMD_PREFIX} test --select silver --target {DBT_TARGET}",
         env=get_dbt_env(),
+        append_env=True,
     )
 
     trigger_dbt_gold = TriggerDagRunOperator(
