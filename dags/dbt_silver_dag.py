@@ -26,7 +26,7 @@ with DAG(
     dag_id="dbt_silver",
     description="Build + test the dbt silver layer (Bakehouse sales/media data), then trigger dbt_gold.",
     default_args=default_args,
-    schedule_interval="0 6 * * *",
+    schedule="0 6 * * *",
     start_date=datetime(2024, 1, 1),
     catchup=False,
     max_active_runs=1,

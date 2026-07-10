@@ -26,7 +26,7 @@ with DAG(
     dag_id="dbt_gold",
     description="Build + test the dbt gold layer (Bakehouse business marts). Triggered by dbt_silver.",
     default_args=default_args,
-    schedule_interval=None,
+    schedule=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
     max_active_runs=1,
