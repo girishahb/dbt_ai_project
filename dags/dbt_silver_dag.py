@@ -15,7 +15,7 @@ from airflow import DAG
 from airflow.operators.bash import BashOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-from dbt_common import DBT_CMD_PREFIX, DBT_TARGET, DEFAULT_DBT_ARGS, get_dbt_env
+from dbt_common import DEFAULT_DBT_ARGS, dbt_command, get_dbt_env
 
 default_args = {
     **DEFAULT_DBT_ARGS,
@@ -35,14 +35,14 @@ with DAG(
 
     dbt_run_silver = BashOperator(
         task_id="dbt_run_silver",
-        bash_command=f"{DBT_CMD_PREFIX} run --select silver --target {DBT_TARGET}",
+        bash_command=dbt_command("run", "silver"),
         env=get_dbt_env(),
         append_env=True,
     )
 
     dbt_test_silver = BashOperator(
         task_id="dbt_test_silver",
-        bash_command=f"{DBT_CMD_PREFIX} test --select silver --target {DBT_TARGET}",
+        bash_command=dbt_command("test", "silver"),
         env=get_dbt_env(),
         append_env=True,
     )

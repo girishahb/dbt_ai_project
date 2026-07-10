@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.bash import BashOperator
 
-from dbt_common import DBT_CMD_PREFIX, DBT_TARGET, DEFAULT_DBT_ARGS, get_dbt_env
+from dbt_common import DEFAULT_DBT_ARGS, dbt_command, get_dbt_env
 
 default_args = {
     **DEFAULT_DBT_ARGS,
@@ -35,14 +35,14 @@ with DAG(
 
     dbt_run_gold = BashOperator(
         task_id="dbt_run_gold",
-        bash_command=f"{DBT_CMD_PREFIX} run --select gold --target {DBT_TARGET}",
+        bash_command=dbt_command("run", "gold"),
         env=get_dbt_env(),
         append_env=True,
     )
 
     dbt_test_gold = BashOperator(
         task_id="dbt_test_gold",
-        bash_command=f"{DBT_CMD_PREFIX} test --select gold --target {DBT_TARGET}",
+        bash_command=dbt_command("test", "gold"),
         env=get_dbt_env(),
         append_env=True,
     )

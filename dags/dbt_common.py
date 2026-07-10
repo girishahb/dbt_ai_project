@@ -102,4 +102,17 @@ DEFAULT_DBT_ARGS = {
     "retries": 1,
 }
 
-DBT_CMD_PREFIX = f'"{DBT_BIN}" --project-dir "{DBT_PROJECT_DIR}" --profiles-dir "{DBT_PROFILES_DIR}"'
+
+def dbt_command(subcommand: str, select: str) -> str:
+    """Build a dbt CLI invocation with the subcommand first.
+
+    `--project-dir`/`--profiles-dir` must come *after* the subcommand
+    (`dbt run --project-dir ...`) -- putting them before it
+    (`dbt --project-dir ... run`) raises `Error: No such option
+    '--project-dir'` on this dbt version, even though it looks like it
+    should be a valid global flag position.
+    """
+    return (
+        f'"{DBT_BIN}" {subcommand} --select {select} --target {DBT_TARGET} '
+        f'--project-dir "{DBT_PROJECT_DIR}" --profiles-dir "{DBT_PROFILES_DIR}"'
+    )
