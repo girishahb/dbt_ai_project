@@ -157,15 +157,20 @@ def dbt_command(subcommand: str, select: str) -> str:
     )
     log_file = os.path.join(DBT_LOG_PATH, "dbt.log")
     # TEMP diagnostic: prints what the shell actually sees for these vars
-    # (lengths only for host/token to avoid leaking secrets into logs) to
-    # pin down whether get_dbt_env()'s rendered values are actually making
-    # it into the dbt subprocess's environment. Remove once catalog/host
-    # resolve correctly.
+    # (whether set/non-empty only for host/token, to avoid leaking secrets
+    # into logs) to pin down whether get_dbt_env()'s rendered values are
+    # actually making it into the dbt subprocess's environment. Remove
+    # once catalog/host resolve correctly.
+    # NB: bash_command is itself Jinja-templated by Airflow, so `${#VAR}`
+    # (bash string-length syntax) can't be used here -- the literal `{#`
+    # is parsed as the start of a Jinja comment tag and blows up with
+    # `TemplateSyntaxError: Missing end of comment tag` before the command
+    # ever runs. `${VAR:+yes}` (prints "yes" if set/non-empty) avoids that.
     diagnostic_echo = (
         'echo "DBT_ENV_CHECK: catalog=[$DBT_DATABRICKS_CATALOG] '
         "schema=[$DBT_DATABRICKS_SCHEMA] "
-        'host_len=${#DBT_DATABRICKS_HOST} token_len=${#DBT_DATABRICKS_TOKEN} '
-        'http_path_len=${#DBT_DATABRICKS_HTTP_PATH}"; '
+        "host_set=${DBT_DATABRICKS_HOST:+yes} token_set=${DBT_DATABRICKS_TOKEN:+yes} "
+        'http_path_set=${DBT_DATABRICKS_HTTP_PATH:+yes}"; '
     )
     return (
         f"{diagnostic_echo}"
