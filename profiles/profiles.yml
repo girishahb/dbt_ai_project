@@ -3,7 +3,7 @@ dbt_ai_project:
   outputs:
     dev:
       type: databricks
-      catalog: "{{ env_var('DBT_DATABRICKS_CATALOG', 'hive_metastore') }}"
+      catalog: "{{ env_var('DBT_DATABRICKS_CATALOG', 'default') }}"
       schema: "{{ env_var('DBT_DATABRICKS_SCHEMA', 'dbt_ai_project_dev') }}"
       host: "{{ env_var('DBT_DATABRICKS_HOST') }}"
       http_path: "{{ env_var('DBT_DATABRICKS_HTTP_PATH') }}"
@@ -12,7 +12,7 @@ dbt_ai_project:
 
     prod:
       type: databricks
-      catalog: "{{ env_var('DBT_DATABRICKS_CATALOG', 'hive_metastore') }}"
+      catalog: "{{ env_var('DBT_DATABRICKS_CATALOG', 'default') }}"
       schema: "{{ env_var('DBT_DATABRICKS_SCHEMA', 'dbt_ai_project') }}"
       host: "{{ env_var('DBT_DATABRICKS_HOST') }}"
       http_path: "{{ env_var('DBT_DATABRICKS_HTTP_PATH') }}"
