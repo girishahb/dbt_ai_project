@@ -92,24 +92,36 @@ _DBT_CREDENTIAL_VARS = {
 def get_dbt_env() -> dict:
     """Build the *additional* environment variables for a dbt subprocess call.
 
-    Deliberately returns only the handful of DBT_* credential vars, not a
-    copy of the full os.environ. `env` is a templated field on BashOperator,
-    and Airflow/Jinja treats any templated string value ending in ".sh" or
-    ".bash" as a path to a template *file* to load rather than a literal
-    string -- MWAA's own environment includes vars like
-    MWAA__CORE__STARTUP_SCRIPT_PATH=/usr/local/airflow/startup/startup.sh,
-    so merging the full environment here causes a
-    `TemplateNotFound: '.../startup.sh' not found in search path` error at
-    task render time.
+    Returns Jinja template strings (`{{ var.value.get(...) }}`), not
+    resolved values, and deliberately only for the handful of DBT_*
+    credential vars rather than a copy of the full os.environ:
+
+    - `env` is a templated field on BashOperator, so Airflow re-renders
+      these Jinja expressions at *task execution* time, reading whatever
+      the Airflow Variables currently hold. Returning already-resolved
+      Variable.get(...) values here instead would bake in whatever they
+      were at *DAG parse* time (this module is imported once by the DAG
+      file processor and the resulting task definitions get cached/
+      serialized) -- updating an Airflow Variable would then silently not
+      take effect until Airflow happened to re-parse the DAG file, which
+      caused exactly this: stale/empty credentials being used run after
+      run despite the Variables being fixed in the UI.
+    - Only including these specific keys (vs. the full environment) avoids
+      a separate problem: Airflow/Jinja treats any templated string value
+      ending in ".sh"/".bash" as a path to a template *file* to load
+      rather than a literal string, and MWAA's own environment includes
+      vars like MWAA__CORE__STARTUP_SCRIPT_PATH=.../startup.sh, so merging
+      the full environment here causes a
+      `TemplateNotFound: '.../startup.sh' not found in search path` error.
 
     Use this together with `append_env=True` on BashOperator: Airflow then
-    inherits the full parent environment at *execution* time (unrendered)
-    and only overlays these few keys on top.
+    inherits the full parent environment at execution time and only
+    overlays these few (freshly rendered) keys on top.
     """
-    env = {}
-    for env_var, airflow_var in _DBT_CREDENTIAL_VARS.items():
-        env[env_var] = Variable.get(airflow_var, default_var=os.environ.get(env_var, ""))
-    return env
+    return {
+        env_var: f"{{{{ var.value.get('{airflow_var}', '') }}}}"
+        for env_var, airflow_var in _DBT_CREDENTIAL_VARS.items()
+    }
 
 
 DEFAULT_DBT_ARGS = {
