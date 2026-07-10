@@ -53,15 +53,24 @@ jobs:
           set -euo pipefail
           BUCKET="${{ vars.S3_BUCKET }}"
 
-          aws s3 cp dbt_project.yml "s3://${BUCKET}/dags/dbt_project.yml"
-          aws s3 sync models/ "s3://${BUCKET}/dags/models/" --delete
-          aws s3 sync macros/ "s3://${BUCKET}/dags/macros/" --delete
-          aws s3 sync seeds/ "s3://${BUCKET}/dags/seeds/" --delete
-          aws s3 sync snapshots/ "s3://${BUCKET}/dags/snapshots/" --delete
-          aws s3 sync analyses/ "s3://${BUCKET}/dags/analyses/" --delete
-          aws s3 sync tests/ "s3://${BUCKET}/dags/tests/" --delete
-          aws s3 sync profiles/ "s3://${BUCKET}/dags/profiles/" --delete
-          aws s3 sync dags/ "s3://${BUCKET}/dags/dags/" --delete --exclude "__pycache__/*"
+          # All pieces (dbt project files + DAG .py files) land flat under the
+          # same s3://<bucket>/dags/ prefix, matching the MWAA "DAGs folder"
+          # setting. They're assembled into one staging dir first and synced
+          # in a single pass so that --delete (which prunes anything at the
+          # destination not present in the source) only ever compares against
+          # this one complete tree, instead of multiple syncs to the same
+          # prefix stepping on each other's files.
+          STAGING_DIR="$(mktemp -d)"
+
+          cp dbt_project.yml "${STAGING_DIR}/"
+          for dir in models macros seeds snapshots analyses tests profiles; do
+            if [ -d "${dir}" ]; then
+              cp -r "${dir}" "${STAGING_DIR}/"
+            fi
+          done
+          cp dags/*.py "${STAGING_DIR}/"
+
+          aws s3 sync "${STAGING_DIR}/" "s3://${BUCKET}/dags/" --delete --exclude "__pycache__/*"
 
       - name: Detect requirements.txt / startup.sh changes
         id: mwaa_config
