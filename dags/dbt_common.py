@@ -111,8 +111,25 @@ def dbt_command(subcommand: str, select: str) -> str:
     (`dbt --project-dir ... run`) raises `Error: No such option
     '--project-dir'` on this dbt version, even though it looks like it
     should be a valid global flag position.
+
+    On failure, also tails dbt's own log file. dbt routes most of its
+    detailed logging to <project-dir>/logs/dbt.log rather than the
+    console -- if it fails early (e.g. profile/connection validation)
+    the console output can be completely empty even though the real
+    error is sitting in that file, which otherwise makes CloudWatch
+    task logs useless for diagnosing the failure.
     """
-    return (
+    dbt_invocation = (
         f'"{DBT_BIN}" {subcommand} --select {select} --target {DBT_TARGET} '
         f'--project-dir "{DBT_PROJECT_DIR}" --profiles-dir "{DBT_PROFILES_DIR}"'
+    )
+    log_file = os.path.join(DBT_PROJECT_DIR, "logs", "dbt.log")
+    return (
+        f"{dbt_invocation}; "
+        f"RC=$?; "
+        f'if [ "$RC" -ne 0 ]; then '
+        f'echo "--- dbt exited with $RC. Tailing {log_file}: ---"; '
+        f'tail -n 200 "{log_file}" 2>&1; '
+        f"fi; "
+        f"exit $RC"
     )
