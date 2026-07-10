@@ -21,9 +21,30 @@ import os
 from airflow.models import Variable
 
 DAGS_DIR = os.path.dirname(os.path.abspath(__file__))
-# The dbt project root is the parent of dags/ (dbt_project.yml, models/,
-# macros/, profiles/ all live one level up from this file).
-PROJECT_ROOT = os.path.dirname(DAGS_DIR)
+
+
+def _find_dbt_project_root(start_dir: str) -> str:
+    """Walk upward from start_dir looking for dbt_project.yml.
+
+    Deployed layout can vary (dbt_project.yml sitting directly alongside the
+    DAG files in dags/, vs. one level up with the DAGs in a dags/ subfolder)
+    depending on exactly how the project was synced to S3 -- searching
+    upward means this works either way instead of hardcoding one assumption.
+    Falls back to the DAG file's own directory if dbt_project.yml can't be
+    found nearby at all (e.g. it genuinely hasn't been synced yet).
+    """
+    current = start_dir
+    for _ in range(5):
+        if os.path.isfile(os.path.join(current, "dbt_project.yml")):
+            return current
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return start_dir
+
+
+PROJECT_ROOT = _find_dbt_project_root(DAGS_DIR)
 
 DBT_PROJECT_DIR = Variable.get("dbt_project_dir", default_var=PROJECT_ROOT)
 DBT_PROFILES_DIR = Variable.get(
@@ -31,11 +52,14 @@ DBT_PROFILES_DIR = Variable.get(
 )
 
 # In MWAA this should point at the isolated virtualenv's dbt binary created
-# by mwaa/startup.sh (e.g. /usr/local/airflow/dbt_venv/bin/dbt) to avoid
-# dependency conflicts between dbt-core and Airflow's own pinned packages.
-# Defaults to whatever `dbt` resolves to on PATH, which is fine for local
-# development where dbt is installed directly.
-DBT_BIN = Variable.get("dbt_bin_path", default_var="dbt")
+# by mwaa/startup.sh, so dbt-core's dependencies don't conflict with
+# Airflow's own pinned packages. Auto-detects that venv if present (so this
+# works out of the box on MWAA without remembering to set an Airflow
+# Variable) and otherwise falls back to whatever `dbt` resolves to on PATH,
+# which is fine for local development where dbt is installed directly.
+_MWAA_DBT_VENV_BIN = "/usr/local/airflow/dbt_venv/bin/dbt"
+_dbt_bin_default = _MWAA_DBT_VENV_BIN if os.path.isfile(_MWAA_DBT_VENV_BIN) else "dbt"
+DBT_BIN = Variable.get("dbt_bin_path", default_var=_dbt_bin_default)
 
 DBT_TARGET = Variable.get("dbt_target", default_var="prod")
 
