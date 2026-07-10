@@ -17,6 +17,7 @@ Designed to run unmodified both locally and in Amazon MWAA:
     same DAGs can be parsed/tested locally without an Airflow Variable store.
 """
 import os
+import tempfile
 
 from airflow.models import Variable
 
@@ -62,6 +63,20 @@ _dbt_bin_default = _MWAA_DBT_VENV_BIN if os.path.isfile(_MWAA_DBT_VENV_BIN) else
 DBT_BIN = Variable.get("dbt_bin_path", default_var=_dbt_bin_default)
 
 DBT_TARGET = Variable.get("dbt_target", default_var="prod")
+
+# dbt always needs to write logs/ and target/ (compiled SQL, manifest.json,
+# run_results.json) under wherever these paths point. In MWAA --project-dir
+# is the S3-synced dags/ folder, which is root-owned and read-only to the
+# airflow user that actually runs tasks -- dbt fails almost instantly (before
+# it can log anything useful) trying to create either directory there. Point
+# both at a writable tmp dir instead, completely independent of --project-dir.
+_DBT_ARTIFACTS_DIR = os.path.join(tempfile.gettempdir(), "dbt_ai_project")
+DBT_LOG_PATH = Variable.get(
+    "dbt_log_path", default_var=os.path.join(_DBT_ARTIFACTS_DIR, "logs")
+)
+DBT_TARGET_PATH = Variable.get(
+    "dbt_target_path", default_var=os.path.join(_DBT_ARTIFACTS_DIR, "target")
+)
 
 # Maps the env var dbt's profiles.yml expects -> the Airflow Variable key
 # it should be sourced from.
@@ -112,18 +127,23 @@ def dbt_command(subcommand: str, select: str) -> str:
     '--project-dir'` on this dbt version, even though it looks like it
     should be a valid global flag position.
 
+    Also redirects dbt's logs/target dirs to DBT_LOG_PATH/DBT_TARGET_PATH
+    (see module docstring above) instead of letting them default to
+    <project-dir>/logs and <project-dir>/target.
+
     On failure, also tails dbt's own log file. dbt routes most of its
-    detailed logging to <project-dir>/logs/dbt.log rather than the
-    console -- if it fails early (e.g. profile/connection validation)
-    the console output can be completely empty even though the real
-    error is sitting in that file, which otherwise makes CloudWatch
-    task logs useless for diagnosing the failure.
+    detailed logging to <log-path>/dbt.log rather than the console --
+    if it fails early (e.g. profile/connection validation) the console
+    output can be completely empty even though the real error is
+    sitting in that file, which otherwise makes CloudWatch task logs
+    useless for diagnosing the failure.
     """
     dbt_invocation = (
         f'"{DBT_BIN}" {subcommand} --select {select} --target {DBT_TARGET} '
-        f'--project-dir "{DBT_PROJECT_DIR}" --profiles-dir "{DBT_PROFILES_DIR}"'
+        f'--project-dir "{DBT_PROJECT_DIR}" --profiles-dir "{DBT_PROFILES_DIR}" '
+        f'--log-path "{DBT_LOG_PATH}" --target-path "{DBT_TARGET_PATH}"'
     )
-    log_file = os.path.join(DBT_PROJECT_DIR, "logs", "dbt.log")
+    log_file = os.path.join(DBT_LOG_PATH, "dbt.log")
     return (
         f"{dbt_invocation}; "
         f"RC=$?; "
