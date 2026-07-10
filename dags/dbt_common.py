@@ -156,7 +156,19 @@ def dbt_command(subcommand: str, select: str) -> str:
         f'--log-path "{DBT_LOG_PATH}" --target-path "{DBT_TARGET_PATH}"'
     )
     log_file = os.path.join(DBT_LOG_PATH, "dbt.log")
+    # TEMP diagnostic: prints what the shell actually sees for these vars
+    # (lengths only for host/token to avoid leaking secrets into logs) to
+    # pin down whether get_dbt_env()'s rendered values are actually making
+    # it into the dbt subprocess's environment. Remove once catalog/host
+    # resolve correctly.
+    diagnostic_echo = (
+        'echo "DBT_ENV_CHECK: catalog=[$DBT_DATABRICKS_CATALOG] '
+        "schema=[$DBT_DATABRICKS_SCHEMA] "
+        'host_len=${#DBT_DATABRICKS_HOST} token_len=${#DBT_DATABRICKS_TOKEN} '
+        'http_path_len=${#DBT_DATABRICKS_HTTP_PATH}"; '
+    )
     return (
+        f"{diagnostic_echo}"
         f"{dbt_invocation}; "
         f"RC=$?; "
         f'if [ "$RC" -ne 0 ]; then '
