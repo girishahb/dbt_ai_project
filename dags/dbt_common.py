@@ -47,14 +47,24 @@ _DBT_ARTIFACTS_DIR = os.path.join(tempfile.gettempdir(), "dbt_ai_project")
 DBT_LOG_PATH = os.path.join(_DBT_ARTIFACTS_DIR, "logs")
 DBT_TARGET_PATH = os.path.join(_DBT_ARTIFACTS_DIR, "target")
 
-# Maps the env var dbt's profiles.yml expects -> the Airflow Variable key.
+# Maps the env var dbt's profiles.yml expects -> (Airflow Variable key,
+# MWAA "Airflow configuration options" custom key).
+# MWAA console custom config `dbt.databricks_host` is injected on workers as
+# env var AIRFLOW__DBT__DATABRICKS_HOST (see AWS docs on Airflow config options).
 _DBT_CREDENTIAL_VARS = {
-    "DBT_DATABRICKS_HOST": "dbt_databricks_host",
-    "DBT_DATABRICKS_HTTP_PATH": "dbt_databricks_http_path",
-    "DBT_DATABRICKS_TOKEN": "dbt_databricks_token",
-    "DBT_DATABRICKS_CATALOG": "dbt_databricks_catalog",
-    "DBT_DATABRICKS_SCHEMA": "dbt_databricks_schema",
+    "DBT_DATABRICKS_HOST": ("dbt_databricks_host", "dbt.databricks_host"),
+    "DBT_DATABRICKS_HTTP_PATH": ("dbt_databricks_http_path", "dbt.databricks_http_path"),
+    "DBT_DATABRICKS_TOKEN": ("dbt_databricks_token", "dbt.databricks_token"),
+    "DBT_DATABRICKS_CATALOG": ("dbt_databricks_catalog", "dbt.databricks_catalog"),
+    "DBT_DATABRICKS_SCHEMA": ("dbt_databricks_schema", "dbt.databricks_schema"),
 }
+
+
+def _mwaa_config_env_name(config_key: str) -> str:
+    """dbt.databricks_host -> AIRFLOW__DBT__DATABRICKS_HOST"""
+    section, key = config_key.split(".", 1)
+    return f"AIRFLOW__{section.upper()}__{key.upper()}"
+
 
 DEFAULT_DBT_ARGS = {
     "owner": "data-engineering",
@@ -101,17 +111,23 @@ def _load_dbt_credentials() -> dict[str, str]:
     """Resolve Databricks credentials.
 
     Order (first hit wins):
-      1. Process env vars DBT_DATABRICKS_* (MWAA console environment variables)
-      2. AIRFLOW_VAR_<key> / airflow.sdk.Variable / airflow.models.Variable
+      1. MWAA Airflow configuration options → AIRFLOW__DBT__* env vars
+         (set in AWS console: Edit → Next → Airflow configuration options
+         → Add custom configuration, e.g. dbt.databricks_host)
+      2. Process env vars DBT_DATABRICKS_*
+      3. AIRFLOW_VAR_* / airflow.sdk.Variable / airflow.models.Variable
 
-    On this MWAA Airflow 3 environment, Admin → Variables are visible in the
-    UI but Variable.get from workers often returns nothing (Task SDK /
-    supervisor). Setting the same values as MWAA environment variables is
-    the reliable path.
+    Admin → Variables often cannot be read from MWAA Airflow 3 workers.
     """
     creds: dict[str, str] = {}
     sources: list[str] = []
-    for env_var, airflow_var in _DBT_CREDENTIAL_VARS.items():
+    for env_var, (airflow_var, mwaa_config_key) in _DBT_CREDENTIAL_VARS.items():
+        mwaa_env = _mwaa_config_env_name(mwaa_config_key)
+        if os.environ.get(mwaa_env):
+            creds[env_var] = os.environ[mwaa_env].strip()
+            sources.append(f"{env_var}=mwaa_config:{mwaa_config_key}")
+            continue
+
         if os.environ.get(env_var):
             creds[env_var] = os.environ[env_var].strip()
             sources.append(f"{env_var}=env")
@@ -150,14 +166,17 @@ def make_dbt_callable(subcommand: str, select: str) -> Callable:
 
         missing = [k for k, v in creds.items() if not v]
         if missing:
+            config_keys = ", ".join(
+                cfg for _, cfg in _DBT_CREDENTIAL_VARS.values()
+            )
             raise RuntimeError(
                 "Missing Databricks credentials: "
                 + ", ".join(missing)
-                + ". Admin → Variables are not readable from MWAA workers on "
-                "this Airflow 3 setup. Set these as MWAA environment variables "
-                "in the AWS console (Environment → Edit → Environment variables): "
-                + ", ".join(_DBT_CREDENTIAL_VARS.keys())
-                + ". Then wait for the environment update to finish and re-run."
+                + ". MWAA has no free-form env-var box. Set them under AWS MWAA "
+                "→ your environment → Edit → Next → Airflow configuration options "
+                "→ Add custom configuration, using these exact keys: "
+                + config_keys
+                + " (values from your local .env). Save, wait until AVAILABLE, re-run."
             )
 
         os.makedirs(DBT_LOG_PATH, exist_ok=True)
