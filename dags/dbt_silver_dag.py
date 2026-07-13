@@ -12,10 +12,15 @@ dbt virtualenv that avoids dependency conflicts with Airflow's own packages.
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.operators.bash import BashOperator
-from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-from dbt_common import DEFAULT_DBT_ARGS, dbt_command
+try:
+    from airflow.providers.standard.operators.python import PythonOperator
+    from airflow.providers.standard.operators.trigger_dagrun import TriggerDagRunOperator
+except ImportError:  # older Airflow layouts
+    from airflow.operators.python import PythonOperator
+    from airflow.operators.trigger_dagrun import TriggerDagRunOperator
+
+from dbt_common import DEFAULT_DBT_ARGS, make_dbt_callable
 
 default_args = {
     **DEFAULT_DBT_ARGS,
@@ -33,14 +38,14 @@ with DAG(
     tags=["dbt", "silver", "bakehouse"],
 ) as dag:
 
-    dbt_run_silver = BashOperator(
+    dbt_run_silver = PythonOperator(
         task_id="dbt_run_silver",
-        bash_command=dbt_command("run", "silver"),
+        python_callable=make_dbt_callable("run", "silver"),
     )
 
-    dbt_test_silver = BashOperator(
+    dbt_test_silver = PythonOperator(
         task_id="dbt_test_silver",
-        bash_command=dbt_command("test", "silver"),
+        python_callable=make_dbt_callable("test", "silver"),
     )
 
     trigger_dbt_gold = TriggerDagRunOperator(

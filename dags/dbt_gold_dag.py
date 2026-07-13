@@ -13,9 +13,13 @@ run manually (e.g. for backfills or gold-only fixes) from the Airflow UI/CLI.
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.operators.bash import BashOperator
 
-from dbt_common import DEFAULT_DBT_ARGS, dbt_command
+try:
+    from airflow.providers.standard.operators.python import PythonOperator
+except ImportError:  # older Airflow layouts
+    from airflow.operators.python import PythonOperator
+
+from dbt_common import DEFAULT_DBT_ARGS, make_dbt_callable
 
 default_args = {
     **DEFAULT_DBT_ARGS,
@@ -33,14 +37,14 @@ with DAG(
     tags=["dbt", "gold", "bakehouse"],
 ) as dag:
 
-    dbt_run_gold = BashOperator(
+    dbt_run_gold = PythonOperator(
         task_id="dbt_run_gold",
-        bash_command=dbt_command("run", "gold"),
+        python_callable=make_dbt_callable("run", "gold"),
     )
 
-    dbt_test_gold = BashOperator(
+    dbt_test_gold = PythonOperator(
         task_id="dbt_test_gold",
-        bash_command=dbt_command("test", "gold"),
+        python_callable=make_dbt_callable("test", "gold"),
     )
 
     dbt_run_gold >> dbt_test_gold
