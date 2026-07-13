@@ -89,39 +89,30 @@ _DBT_CREDENTIAL_VARS = {
 }
 
 
-def get_dbt_env() -> dict:
-    """Build the *additional* environment variables for a dbt subprocess call.
+def _credential_exports() -> str:
+    """Shell snippet exporting the dbt Databricks credentials, read fresh
+    at task *execution* time via the `airflow variables get` CLI.
 
-    Returns Jinja template strings (`{{ var.value.get(...) }}`), not
-    resolved values, and deliberately only for the handful of DBT_*
-    credential vars rather than a copy of the full os.environ:
-
-    - `env` is a templated field on BashOperator, so Airflow re-renders
-      these Jinja expressions at *task execution* time, reading whatever
-      the Airflow Variables currently hold. Returning already-resolved
-      Variable.get(...) values here instead would bake in whatever they
-      were at *DAG parse* time (this module is imported once by the DAG
-      file processor and the resulting task definitions get cached/
-      serialized) -- updating an Airflow Variable would then silently not
-      take effect until Airflow happened to re-parse the DAG file, which
-      caused exactly this: stale/empty credentials being used run after
-      run despite the Variables being fixed in the UI.
-    - Only including these specific keys (vs. the full environment) avoids
-      a separate problem: Airflow/Jinja treats any templated string value
-      ending in ".sh"/".bash" as a path to a template *file* to load
-      rather than a literal string, and MWAA's own environment includes
-      vars like MWAA__CORE__STARTUP_SCRIPT_PATH=.../startup.sh, so merging
-      the full environment here causes a
-      `TemplateNotFound: '.../startup.sh' not found in search path` error.
-
-    Use this together with `append_env=True` on BashOperator: Airflow then
-    inherits the full parent environment at execution time and only
-    overlays these few (freshly rendered) keys on top.
+    Earlier attempts resolved these via BashOperator's `env` dict, either
+    eagerly with Variable.get() (which bakes in whatever the Variables
+    held at *DAG parse* time -- updating them afterwards silently had no
+    effect until the DAG happened to be re-parsed) or via Jinja templates
+    like `{{ var.value.get(...) }}` in the `env` field (which reliably
+    rendered to empty strings on this MWAA environment's Airflow version
+    for reasons not worth chasing further -- possibly related to the
+    newer Task SDK execution model, going by the
+    "Using Variable.get from airflow.models is deprecated" warning these
+    DAGs also trip). Shelling out to the same `airflow` CLI that's
+    already on PATH in every worker sidesteps both problems: it reads
+    the Variables at the moment the command actually runs, through
+    whichever mechanism is currently correct for this Airflow version,
+    independent of our own Python imports or Jinja/dict templating.
     """
-    return {
-        env_var: f"{{{{ var.value.get('{airflow_var}', '') }}}}"
+    exports = " ".join(
+        f'export {env_var}="$(airflow variables get {airflow_var} 2>/dev/null)";'
         for env_var, airflow_var in _DBT_CREDENTIAL_VARS.items()
-    }
+    )
+    return exports + " "
 
 
 DEFAULT_DBT_ARGS = {
@@ -141,7 +132,9 @@ def dbt_command(subcommand: str, select: str) -> str:
 
     Also redirects dbt's logs/target dirs to DBT_LOG_PATH/DBT_TARGET_PATH
     (see module docstring above) instead of letting them default to
-    <project-dir>/logs and <project-dir>/target.
+    <project-dir>/logs and <project-dir>/target, and exports the
+    Databricks credentials (see `_credential_exports`) right before
+    invoking dbt.
 
     On failure, also tails dbt's own log file. dbt routes most of its
     detailed logging to <log-path>/dbt.log rather than the console --
@@ -156,16 +149,11 @@ def dbt_command(subcommand: str, select: str) -> str:
         f'--log-path "{DBT_LOG_PATH}" --target-path "{DBT_TARGET_PATH}"'
     )
     log_file = os.path.join(DBT_LOG_PATH, "dbt.log")
-    # TEMP diagnostic: prints what the shell actually sees for these vars
-    # (whether set/non-empty only for host/token, to avoid leaking secrets
-    # into logs) to pin down whether get_dbt_env()'s rendered values are
-    # actually making it into the dbt subprocess's environment. Remove
-    # once catalog/host resolve correctly.
-    # NB: bash_command is itself Jinja-templated by Airflow, so `${#VAR}`
-    # (bash string-length syntax) can't be used here -- the literal `{#`
-    # is parsed as the start of a Jinja comment tag and blows up with
-    # `TemplateSyntaxError: Missing end of comment tag` before the command
-    # ever runs. `${VAR:+yes}` (prints "yes" if set/non-empty) avoids that.
+    # TEMP diagnostic: confirms the `airflow variables get`-based exports
+    # above actually populated these vars before handing off to dbt.
+    # Remove once confirmed working. Avoid `${#VAR}` here (bash
+    # string-length syntax) -- bash_command is Jinja-templated by
+    # Airflow, and the literal `{#` is parsed as a Jinja comment tag.
     diagnostic_echo = (
         'echo "DBT_ENV_CHECK: catalog=[$DBT_DATABRICKS_CATALOG] '
         "schema=[$DBT_DATABRICKS_SCHEMA] "
@@ -173,6 +161,7 @@ def dbt_command(subcommand: str, select: str) -> str:
         'http_path_set=${DBT_DATABRICKS_HTTP_PATH:+yes}"; '
     )
     return (
+        f"{_credential_exports()}"
         f"{diagnostic_echo}"
         f"{dbt_invocation}; "
         f"RC=$?; "
