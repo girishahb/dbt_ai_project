@@ -169,9 +169,22 @@ def dbt_command(subcommand: str, select: str) -> str:
         "host_set=${DBT_DATABRICKS_HOST:+yes} token_set=${DBT_DATABRICKS_TOKEN:+yes} "
         'http_path_set=${DBT_DATABRICKS_HTTP_PATH:+yes}"; '
     )
+    # TEMP: set the `dbt_diagnostic_only` Airflow Variable to "true" to make
+    # the task stop right after printing the line above instead of running
+    # the (long, noisy) dbt invocation -- avoids having to dig through a
+    # huge accumulated dbt.log tail just to see whether credentials
+    # resolved correctly. Checked fresh in bash on every run, so toggling
+    # it takes effect on the very next trigger with no redeploy needed.
+    # Set back to "false" (or delete the Variable) once confirmed working.
+    diagnostic_only_check = (
+        'DIAG_ONLY="$(airflow variables get dbt_diagnostic_only 2>/dev/null '
+        "| grep -v 'CloudWatch logging is disabled' | tail -n 1)\"; "
+        'if [ "$DIAG_ONLY" = "true" ]; then exit 1; fi; '
+    )
     return (
         f"{_credential_exports()}"
         f"{diagnostic_echo}"
+        f"{diagnostic_only_check}"
         f"{dbt_invocation}; "
         f"RC=$?; "
         f'if [ "$RC" -ne 0 ]; then '
