@@ -107,9 +107,18 @@ def _credential_exports() -> str:
     the Variables at the moment the command actually runs, through
     whichever mechanism is currently correct for this Airflow version,
     independent of our own Python imports or Jinja/dict templating.
+
+    `airflow variables get` on this MWAA environment also writes
+    "CloudWatch logging is disabled for SubprocessLogHandler" to
+    *stdout* (not stderr) as a side effect of initializing its own
+    logging -- left alone that noise gets captured by the `$(...)`
+    substitution right along with the real value, corrupting it. The
+    `grep -v` + `tail -n 1` below strips that specific line out and
+    takes the last remaining line as the actual value.
     """
     exports = " ".join(
-        f'export {env_var}="$(airflow variables get {airflow_var} 2>/dev/null)";'
+        f"export {env_var}=\"$(airflow variables get {airflow_var} 2>/dev/null "
+        f"| grep -v 'CloudWatch logging is disabled' | tail -n 1)\";"
         for env_var, airflow_var in _DBT_CREDENTIAL_VARS.items()
     )
     return exports + " "
