@@ -62,33 +62,70 @@ DEFAULT_DBT_ARGS = {
 }
 
 
-def _get_variable(key: str, default: str = "") -> str:
-    """Read an Airflow Variable at task execution time (Airflow 3 SDK first)."""
+def _get_variable(key: str) -> tuple[str | None, str]:
+    """Try to read an Airflow Variable. Returns (value_or_None, source_note)."""
+    # 1) Airflow's env-var backend: AIRFLOW_VAR_<KEY> (uppercase)
+    env_key = f"AIRFLOW_VAR_{key.upper()}"
+    if env_key in os.environ and os.environ[env_key] != "":
+        return os.environ[env_key], f"env:{env_key}"
+
+    # 2) Task SDK (Airflow 3) -- may fail on some MWAA worker setups
     try:
         from airflow.sdk import Variable as SdkVariable
 
         try:
-            return SdkVariable.get(key, default=default)
-        except TypeError:
-            return SdkVariable.get(key, default_var=default)
-    except Exception:
-        pass
+            value = SdkVariable.get(key)
+            if value is not None and str(value) != "":
+                return str(value), "airflow.sdk.Variable"
+        except Exception as exc:  # VARIABLE_NOT_FOUND or supervisor errors
+            sdk_err = f"{type(exc).__name__}: {exc}"
+        else:
+            sdk_err = "empty"
+    except Exception as exc:
+        sdk_err = f"import/get failed: {type(exc).__name__}: {exc}"
+
+    # 3) Legacy models API (usually no DB access on Airflow 3 workers)
     try:
         from airflow.models import Variable as ModelsVariable
 
-        return ModelsVariable.get(key, default_var=default)
+        value = ModelsVariable.get(key)
+        if value is not None and str(value) != "":
+            return str(value), "airflow.models.Variable"
     except Exception:
-        return default
+        pass
+
+    return None, f"not found (sdk: {sdk_err})"
 
 
 def _load_dbt_credentials() -> dict[str, str]:
-    """Resolve Databricks credentials from Airflow Variables, else os.environ."""
+    """Resolve Databricks credentials.
+
+    Order (first hit wins):
+      1. Process env vars DBT_DATABRICKS_* (MWAA console environment variables)
+      2. AIRFLOW_VAR_<key> / airflow.sdk.Variable / airflow.models.Variable
+
+    On this MWAA Airflow 3 environment, Admin → Variables are visible in the
+    UI but Variable.get from workers often returns nothing (Task SDK /
+    supervisor). Setting the same values as MWAA environment variables is
+    the reliable path.
+    """
     creds: dict[str, str] = {}
+    sources: list[str] = []
     for env_var, airflow_var in _DBT_CREDENTIAL_VARS.items():
-        value = _get_variable(airflow_var, default="")
-        if not value:
-            value = os.environ.get(env_var, "")
-        creds[env_var] = value.strip() if isinstance(value, str) else ""
+        if os.environ.get(env_var):
+            creds[env_var] = os.environ[env_var].strip()
+            sources.append(f"{env_var}=env")
+            continue
+
+        value, source = _get_variable(airflow_var)
+        if value:
+            creds[env_var] = value.strip()
+            sources.append(f"{env_var}={source}")
+        else:
+            creds[env_var] = ""
+            sources.append(f"{env_var}=MISSING ({source})")
+
+    print("DBT_CRED_SOURCES: " + "; ".join(sources))
     return creds
 
 
@@ -96,8 +133,7 @@ def make_dbt_callable(subcommand: str, select: str) -> Callable:
     """Return a PythonOperator callable that runs a dbt subcommand.
 
     Credentials are loaded inside the callable (task execution time), not
-    when the DAG file is parsed. Prefer airflow.sdk.Variable; fall back to
-    process env vars so MWAA console environment variables also work.
+    when the DAG file is parsed.
     """
 
     def _run_dbt(**_context) -> None:
@@ -115,11 +151,13 @@ def make_dbt_callable(subcommand: str, select: str) -> Callable:
         missing = [k for k, v in creds.items() if not v]
         if missing:
             raise RuntimeError(
-                "Missing Databricks credentials (Airflow Variables or env vars): "
+                "Missing Databricks credentials: "
                 + ", ".join(missing)
-                + ". Set Admin → Variables keys "
-                + ", ".join(_DBT_CREDENTIAL_VARS.values())
-                + " (or equivalent MWAA environment variables)."
+                + ". Admin → Variables are not readable from MWAA workers on "
+                "this Airflow 3 setup. Set these as MWAA environment variables "
+                "in the AWS console (Environment → Edit → Environment variables): "
+                + ", ".join(_DBT_CREDENTIAL_VARS.keys())
+                + ". Then wait for the environment update to finish and re-run."
             )
 
         os.makedirs(DBT_LOG_PATH, exist_ok=True)
