@@ -4,12 +4,10 @@ dbt_gold_dag.py). No DAGs are defined here -- Airflow's DAG file processor
 will parse this module (since it lives in the dags/ folder) but skip it
 because it contains no DAG object.
 
-Designed to run unmodified both locally and in Amazon MWAA:
-  - Project paths are resolved relative to this file's location.
-  - Databricks credentials are read at *task execution* time via
-    airflow.sdk.Variable (Airflow 3), falling back to process environment
-    variables (so MWAA console env vars also work). Values are never baked
-    in at DAG parse time.
+On Amazon MWAA, Databricks credentials are expected from Airflow
+configuration options (e.g. dbt.databricks_host), which MWAA injects as
+AIRFLOW__DBT__* environment variables on every worker. Local runs can use
+plain DBT_DATABRICKS_* env vars instead.
 """
 from __future__ import annotations
 
@@ -47,16 +45,19 @@ _DBT_ARTIFACTS_DIR = os.path.join(tempfile.gettempdir(), "dbt_ai_project")
 DBT_LOG_PATH = os.path.join(_DBT_ARTIFACTS_DIR, "logs")
 DBT_TARGET_PATH = os.path.join(_DBT_ARTIFACTS_DIR, "target")
 
-# Maps the env var dbt's profiles.yml expects -> (Airflow Variable key,
-# MWAA "Airflow configuration options" custom key).
-# MWAA console custom config `dbt.databricks_host` is injected on workers as
-# env var AIRFLOW__DBT__DATABRICKS_HOST (see AWS docs on Airflow config options).
-_DBT_CREDENTIAL_VARS = {
-    "DBT_DATABRICKS_HOST": ("dbt_databricks_host", "dbt.databricks_host"),
-    "DBT_DATABRICKS_HTTP_PATH": ("dbt_databricks_http_path", "dbt.databricks_http_path"),
-    "DBT_DATABRICKS_TOKEN": ("dbt_databricks_token", "dbt.databricks_token"),
-    "DBT_DATABRICKS_CATALOG": ("dbt_databricks_catalog", "dbt.databricks_catalog"),
-    "DBT_DATABRICKS_SCHEMA": ("dbt_databricks_schema", "dbt.databricks_schema"),
+# env var for profiles.yml -> MWAA Airflow configuration option key
+# (dbt.databricks_host is injected as AIRFLOW__DBT__DATABRICKS_HOST).
+_DBT_CREDENTIAL_CONFIG = {
+    "DBT_DATABRICKS_HOST": "dbt.databricks_host",
+    "DBT_DATABRICKS_HTTP_PATH": "dbt.databricks_http_path",
+    "DBT_DATABRICKS_TOKEN": "dbt.databricks_token",
+    "DBT_DATABRICKS_CATALOG": "dbt.databricks_catalog",
+    "DBT_DATABRICKS_SCHEMA": "dbt.databricks_schema",
+}
+
+DEFAULT_DBT_ARGS = {
+    "owner": "data-engineering",
+    "retries": 1,
 }
 
 
@@ -66,117 +67,34 @@ def _mwaa_config_env_name(config_key: str) -> str:
     return f"AIRFLOW__{section.upper()}__{key.upper()}"
 
 
-DEFAULT_DBT_ARGS = {
-    "owner": "data-engineering",
-    "retries": 1,
-}
-
-
-def _get_variable(key: str) -> tuple[str | None, str]:
-    """Try to read an Airflow Variable. Returns (value_or_None, source_note)."""
-    # 1) Airflow's env-var backend: AIRFLOW_VAR_<KEY> (uppercase)
-    env_key = f"AIRFLOW_VAR_{key.upper()}"
-    if env_key in os.environ and os.environ[env_key] != "":
-        return os.environ[env_key], f"env:{env_key}"
-
-    # 2) Task SDK (Airflow 3) -- may fail on some MWAA worker setups
-    try:
-        from airflow.sdk import Variable as SdkVariable
-
-        try:
-            value = SdkVariable.get(key)
-            if value is not None and str(value) != "":
-                return str(value), "airflow.sdk.Variable"
-        except Exception as exc:  # VARIABLE_NOT_FOUND or supervisor errors
-            sdk_err = f"{type(exc).__name__}: {exc}"
-        else:
-            sdk_err = "empty"
-    except Exception as exc:
-        sdk_err = f"import/get failed: {type(exc).__name__}: {exc}"
-
-    # 3) Legacy models API (usually no DB access on Airflow 3 workers)
-    try:
-        from airflow.models import Variable as ModelsVariable
-
-        value = ModelsVariable.get(key)
-        if value is not None and str(value) != "":
-            return str(value), "airflow.models.Variable"
-    except Exception:
-        pass
-
-    return None, f"not found (sdk: {sdk_err})"
-
-
 def _load_dbt_credentials() -> dict[str, str]:
-    """Resolve Databricks credentials.
+    """Resolve Databricks credentials for the dbt subprocess.
 
-    Order (first hit wins):
-      1. MWAA Airflow configuration options → AIRFLOW__DBT__* env vars
-         (set in AWS console: Edit → Next → Airflow configuration options
-         → Add custom configuration, e.g. dbt.databricks_host)
-      2. Process env vars DBT_DATABRICKS_*
-      3. AIRFLOW_VAR_* / airflow.sdk.Variable / airflow.models.Variable
-
-    Admin → Variables often cannot be read from MWAA Airflow 3 workers.
+    Prefers MWAA Airflow configuration options (AIRFLOW__DBT__*), then
+    plain DBT_DATABRICKS_* process env vars (local / .env).
     """
     creds: dict[str, str] = {}
-    sources: list[str] = []
-    for env_var, (airflow_var, mwaa_config_key) in _DBT_CREDENTIAL_VARS.items():
+    for env_var, mwaa_config_key in _DBT_CREDENTIAL_CONFIG.items():
         mwaa_env = _mwaa_config_env_name(mwaa_config_key)
-        if os.environ.get(mwaa_env):
-            creds[env_var] = os.environ[mwaa_env].strip()
-            sources.append(f"{env_var}=mwaa_config:{mwaa_config_key}")
-            continue
-
-        if os.environ.get(env_var):
-            creds[env_var] = os.environ[env_var].strip()
-            sources.append(f"{env_var}=env")
-            continue
-
-        value, source = _get_variable(airflow_var)
-        if value:
-            creds[env_var] = value.strip()
-            sources.append(f"{env_var}={source}")
-        else:
-            creds[env_var] = ""
-            sources.append(f"{env_var}=MISSING ({source})")
-
-    print("DBT_CRED_SOURCES: " + "; ".join(sources))
+        value = os.environ.get(mwaa_env) or os.environ.get(env_var) or ""
+        creds[env_var] = value.strip()
     return creds
 
 
 def make_dbt_callable(subcommand: str, select: str) -> Callable:
-    """Return a PythonOperator callable that runs a dbt subcommand.
-
-    Credentials are loaded inside the callable (task execution time), not
-    when the DAG file is parsed.
-    """
+    """Return a PythonOperator callable that runs a dbt subcommand."""
 
     def _run_dbt(**_context) -> None:
         creds = _load_dbt_credentials()
-        catalog = creds.get("DBT_DATABRICKS_CATALOG", "")
-        schema = creds.get("DBT_DATABRICKS_SCHEMA", "")
-        print(
-            "DBT_ENV_CHECK: "
-            f"catalog=[{catalog}] schema=[{schema}] "
-            f"host_set={'yes' if creds.get('DBT_DATABRICKS_HOST') else 'no'} "
-            f"token_set={'yes' if creds.get('DBT_DATABRICKS_TOKEN') else 'no'} "
-            f"http_path_set={'yes' if creds.get('DBT_DATABRICKS_HTTP_PATH') else 'no'}"
-        )
-
         missing = [k for k, v in creds.items() if not v]
         if missing:
-            config_keys = ", ".join(
-                cfg for _, cfg in _DBT_CREDENTIAL_VARS.values()
-            )
+            config_keys = ", ".join(_DBT_CREDENTIAL_CONFIG.values())
             raise RuntimeError(
                 "Missing Databricks credentials: "
                 + ", ".join(missing)
-                + ". MWAA has no free-form env-var box. Set them under AWS MWAA "
-                "→ your environment → Edit → Next → Airflow configuration options "
-                "→ Add custom configuration, using these exact keys: "
+                + ". On MWAA set Airflow configuration options: "
                 + config_keys
-                + " (values from your local .env). Save, wait until AVAILABLE, re-run."
+                + ". Locally export the matching DBT_DATABRICKS_* env vars."
             )
 
         os.makedirs(DBT_LOG_PATH, exist_ok=True)
@@ -201,7 +119,6 @@ def make_dbt_callable(subcommand: str, select: str) -> Callable:
             "--target-path",
             DBT_TARGET_PATH,
         ]
-        print("Running:", " ".join(cmd))
         result = subprocess.run(cmd, env=env, text=True, capture_output=False)
 
         if result.returncode != 0:
@@ -209,8 +126,7 @@ def make_dbt_callable(subcommand: str, select: str) -> Callable:
             print(f"--- dbt exited with {result.returncode}. Tailing {log_file}: ---")
             try:
                 with open(log_file, encoding="utf-8", errors="replace") as fh:
-                    lines = fh.readlines()
-                print("".join(lines[-200:]))
+                    print("".join(fh.readlines()[-200:]))
             except OSError as exc:
                 print(f"(could not read dbt.log: {exc})")
             raise RuntimeError(f"dbt {subcommand} failed with exit code {result.returncode}")

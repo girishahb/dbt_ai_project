@@ -82,9 +82,14 @@ This project follows a medallion architecture on top of the Databricks "Bakehous
 Two DAGs in `dags/` run the medallion pipeline:
 
 - **`dbt_silver`** — runs `dbt run --select silver` then `dbt test --select silver` on a daily schedule (`0 6 * * *`), then triggers `dbt_gold`.
-- **`dbt_gold`** — runs `dbt run --select gold` then `dbt test --select gold`. It has no schedule of its own (`schedule_interval=None`) — it's only triggered by `dbt_silver`, so gold always builds on fresh silver data instead of racing a fixed clock offset. It can still be triggered manually for backfills.
+- **`dbt_gold`** — runs `dbt run --select gold` then `dbt test --select gold`. It has no schedule of its own (`schedule=None`) — it's only triggered by `dbt_silver`, so gold always builds on fresh silver data instead of racing a fixed clock offset. It can still be triggered manually for backfills.
 
-`dags/dbt_common.py` holds shared config: it resolves `DBT_PROJECT_DIR`/`DBT_PROFILES_DIR` relative to the DAG file's own location (so the same code works locally and once synced to MWAA's `dags/` S3 prefix), and reads Databricks credentials from Airflow Variables so they can be backed by [MWAA's Secrets Manager backend](https://docs.aws.amazon.com/mwaa/latest/userguide/connections-secrets-manager.html) instead of a `.env` file.
+`dags/dbt_common.py` holds shared config: it resolves the dbt project/profiles
+paths relative to the DAG file, runs dbt from the MWAA startup-script venv
+when present, and loads Databricks credentials from MWAA **Airflow
+configuration options** (`dbt.databricks_host`, etc. → `AIRFLOW__DBT__*`
+env vars on workers). Locally the same code falls back to `DBT_DATABRICKS_*`
+environment variables.
 
 **Why a separate `profiles/profiles.yml`:** MWAA workers don't have your local `~/.dbt/profiles.yml`, so a copy that only references `env_var(...)` (no literal secrets — safe to commit) is deployed alongside the DAGs and pointed to via `--profiles-dir`.
 
@@ -92,14 +97,18 @@ Two DAGs in `dags/` run the medallion pipeline:
 
 ### Deploying to MWAA
 
-1. Sync this whole repo to your MWAA environment's S3 `dags/` prefix (so `dbt_project.yml`, `models/`, `macros/`, `profiles/` sit alongside `dags/dbt_silver_dag.py` / `dags/dbt_gold_dag.py` — paths are resolved relative to the DAG files, so this layout just works).
+1. Sync this whole repo to your MWAA environment's S3 `dags/` prefix (so `dbt_project.yml`, `models/`, `macros/`, `profiles/` sit alongside the DAG `.py` files — the GitHub Actions workflow does this on push to `main`).
 2. Upload `mwaa/startup.sh` to S3 and set it as the environment's **Startup script file** (with its S3 object version).
 3. Point the environment's **Requirements file** at `mwaa/requirements.txt` (no extra packages needed today beyond what MWAA bundles).
-4. In the Airflow UI (Admin > Variables), or via a Secrets Manager-backed secret, set:
-   - `dbt_bin_path` = `/usr/local/airflow/dbt_venv/bin/dbt`
-   - `dbt_databricks_host`, `dbt_databricks_http_path`, `dbt_databricks_token`, `dbt_databricks_catalog`, `dbt_databricks_schema`
-   - Optional overrides: `dbt_project_dir`, `dbt_profiles_dir`, `dbt_target` (defaults to `prod`)
+4. In the AWS MWAA console → environment → **Edit** → **Next** → **Airflow configuration options** → **Add custom configuration**, set:
+   - `dbt.databricks_host`
+   - `dbt.databricks_http_path`
+   - `dbt.databricks_token`
+   - `dbt.databricks_catalog`
+   - `dbt.databricks_schema`
 5. Unpause `dbt_silver` (and `dbt_gold`, though it only runs when triggered) in the Airflow UI.
+
+> Note: Airflow Admin → Variables are *not* reliably readable from MWAA Airflow 3 workers for this setup. Prefer the Airflow configuration options above.
 
 ### Testing locally
 
