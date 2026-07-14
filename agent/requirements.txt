@@ -1,0 +1,21 @@
+# Runtime dependencies for the self-heal LangGraph agent (see agent/README.md).
+# Pinned to major.minor so a fresh `docker build` doesn't silently pick up a
+# breaking LangGraph/langchain release; bump deliberately and re-test.
+
+langgraph==0.2.*
+langchain-core==0.3.*
+langchain-aws==0.2.*
+pydantic==2.*
+boto3==1.35.*
+requests==2.32.*
+PyGithub==2.4.*
+# Version pinned to what dbt-databricks 1.12.1 requires (>=4.1.1,<4.2.7) --
+# the agent's own tools/databricks_introspect.py uses the same package dbt
+# itself uses under the hood, so there's only ever one connector version to
+# reason about.
+databricks-sql-connector==4.2.6
+
+# Same dbt versions mwaa/startup.sh installs -- the agent's `dbt build
+# --target ci` must behave identically to what MWAA/dbt_ci.yml would run.
+dbt-core==1.11.11
+dbt-databricks==1.12.1
