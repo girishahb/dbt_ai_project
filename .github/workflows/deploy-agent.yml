@@ -1,0 +1,91 @@
+name: Deploy self-heal agent
+
+# Builds+pushes the agent image to ECR and applies infra/ on every push to
+# main that touches either -- mirrors deploy-mwaa.yml's OIDC pattern.
+# Requires the same AWS_ROLE_ARN/AWS_REGION repo variables as deploy-mwaa.yml,
+# extended with ecr:*, ecs:*, lambda:*, dynamodb:*, secretsmanager:Create/
+# Describe*, events:*, iam:PassRole/CreateRole (scoped to the resources this
+# repo's Terraform creates -- see infra/*.tf) plus terraform's own state
+# backend access if one is configured.
+#
+# Deliberately requires manual approval the first time (see the `environment:`
+# block) -- an agent that can auto-merge to main is not something to wire up
+# unattended on the very first run.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "agent/**"
+      - "dispatcher/**"
+      - "infra/**"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-agent
+  cancel-in-progress: false
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    environment: agent-deploy
+    outputs:
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compute image tag
+        id: meta
+        run: echo "image_tag=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push agent image
+        env:
+          ECR_REPOSITORY: ${{ vars.AGENT_ECR_REPOSITORY }}
+          IMAGE_TAG: ${{ steps.meta.outputs.image_tag }}
+        run: |
+          set -euo pipefail
+          docker build -f agent/Dockerfile -t "${ECR_REPOSITORY}:${IMAGE_TAG}" -t "${ECR_REPOSITORY}:latest" .
+          docker push "${ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker push "${ECR_REPOSITORY}:latest"
+
+  terraform-apply:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: agent-deploy
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform init (remote state -- see infra/README.md)
+        run: >
+          terraform init
+          -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}"
+          -backend-config="key=${{ vars.TF_STATE_KEY }}"
+          -backend-config="region=${{ vars.TF_STATE_REGION }}"
+          -backend-config="dynamodb_table=${{ vars.TF_STATE_LOCK_TABLE }}"
+
+      - run: >
+          terraform apply -auto-approve
+          -var="agent_image_tag=${{ needs.build-and-push.outputs.image_tag }}"

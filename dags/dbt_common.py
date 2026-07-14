@@ -11,6 +11,7 @@ plain DBT_DATABRICKS_* env vars instead.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -55,9 +56,51 @@ _DBT_CREDENTIAL_CONFIG = {
     "DBT_DATABRICKS_SCHEMA": "dbt.databricks_schema",
 }
 
+def notify_self_heal_agent(context: dict) -> None:
+    """`on_failure_callback` wired into every dbt task via DEFAULT_DBT_ARGS.
+
+    Fires an EventBridge event carrying just enough to locate the failure
+    (dag/task/run id) and lets everything downstream -- the dispatcher
+    Lambda, the LangGraph agent -- pull the actual dbt error text from the
+    Airflow REST API/CloudWatch Logs itself. Deliberately thin: this runs
+    inline on the Airflow worker's failure path, so it must never block or
+    itself raise (a broken notifier shouldn't turn one failed task into a
+    scheduler-wide problem) -- any error here is caught and logged, not
+    propagated.
+
+    No-ops with a log line if boto3/credentials aren't available, so the
+    exact same DAG code runs locally without an AWS self-heal stack wired up.
+    """
+    try:
+        import boto3
+
+        task_instance = context["task_instance"]
+        events = boto3.client("events", region_name=os.environ.get("AWS_REGION"))
+        events.put_events(
+            Entries=[
+                {
+                    "Source": "airflow.dbt",
+                    "DetailType": "DbtTaskFailed",
+                    "Detail": json.dumps(
+                        {
+                            "dag_id": context["dag"].dag_id,
+                            "task_id": task_instance.task_id,
+                            "run_id": context["run_id"],
+                            "try_number": task_instance.try_number,
+                            "log_url": task_instance.log_url,
+                        }
+                    ),
+                }
+            ]
+        )
+    except Exception as exc:  # noqa: BLE001 - failure notification must never raise
+        print(f"notify_self_heal_agent: could not publish EventBridge event: {exc}")
+
+
 DEFAULT_DBT_ARGS = {
     "owner": "data-engineering",
     "retries": 1,
+    "on_failure_callback": notify_self_heal_agent,
 }
 
 

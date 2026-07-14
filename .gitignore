@@ -8,3 +8,14 @@ __pycache__/
 venv/
 .DS_Store
 .user.yml
+
+# Terraform (infra/) -- .terraform.lock.hcl is intentionally NOT ignored,
+# committing it is how Terraform pins provider versions for everyone.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+infra/tfplan
+infra/terraform.tfvars
+infra/.build/
+
