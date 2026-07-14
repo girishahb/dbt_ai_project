@@ -25,6 +25,13 @@ import requests
 _SESSION_TIMEOUT_S = 15
 
 
+def _cloudwatch_run_id(run_id: str) -> str:
+    # MWAA writes task log streams with colons in run_id replaced by underscores
+    # (e.g. manual__2026-07-14T08:30:16+00:00 -> manual__2026-07-14T08_30_16+00_00).
+    # DescribeLogStreams also rejects ':' in logStreamNamePrefix, so always sanitize.
+    return run_id.replace(":", "_")
+
+
 class MwaaClient:
     def __init__(self, environment_name: str, region: str | None = None):
         self.environment_name = environment_name
@@ -71,7 +78,8 @@ class MwaaClient:
         log_group = f"airflow-{self.environment_name}-task"
         # Default MWAA/Airflow 2.x log filename template:
         # dag_id={dag}/run_id={run}/task_id={task}/attempt={try}.log
-        stream_prefix = f"dag_id={dag_id}/run_id={run_id}/task_id={task_id}/attempt={try_number}"
+        cw_run_id = _cloudwatch_run_id(run_id)
+        stream_prefix = f"dag_id={dag_id}/run_id={cw_run_id}/task_id={task_id}/attempt={try_number}"
         streams = self._logs.describe_log_streams(
             logGroupName=log_group, logStreamNamePrefix=stream_prefix
         ).get("logStreams", [])
