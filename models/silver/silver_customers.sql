@@ -25,7 +25,8 @@ cleaned as (
             when lower(trim(gender)) in ('female', 'f') then 'Female'
             when lower(trim(gender)) in ('male', 'm') then 'Male'
             else 'Unknown'
-        end as gender
+        end as gender,
+        customer_loyalty_score
     from source
     where customerID is not null
 
@@ -53,6 +54,7 @@ select
     country,
     continent,
     postal_zip_code,
-    gender
+    gender,
+    customer_loyalty_score
 from deduped
 where rn = 1
