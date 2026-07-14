@@ -12,15 +12,15 @@ from github import Auth, Github
 from agent import config
 
 
-def _client() -> Github:
-    auth = Auth.AppAuth(config.GITHUB_APP_ID, config.GITHUB_APP_PRIVATE_KEY).get_installation_auth(
+def _installation_auth():
+    return Auth.AppAuth(config.GITHUB_APP_ID, config.GITHUB_APP_PRIVATE_KEY).get_installation_auth(
         int(config.GITHUB_APP_INSTALLATION_ID)
     )
+
+
+def _client() -> Github:
+    auth = _installation_auth()
     return Github(auth=auth)
-
-
-def _repo():
-    return _client().get_repo(f"{config.GITHUB_OWNER}/{config.GITHUB_REPO}")
 
 
 def clone_url_with_token() -> str:
@@ -28,11 +28,16 @@ def clone_url_with_token() -> str:
     tools.repo_tools.clone_repo / commit_and_push to authenticate with
     (installation tokens are short-lived, ~1h -- generated fresh per run,
     never stored)."""
-    auth = Auth.AppAuth(config.GITHUB_APP_ID, config.GITHUB_APP_PRIVATE_KEY).get_installation_auth(
-        int(config.GITHUB_APP_INSTALLATION_ID)
-    )
+    # AppInstallationAuth.token is lazy and requires a Requester; constructing
+    # Github(auth=...) wires that up (same as _client()).
+    auth = _installation_auth()
+    Github(auth=auth)
     token = auth.token
     return f"https://x-access-token:{token}@github.com/{config.GITHUB_OWNER}/{config.GITHUB_REPO}.git"
+
+
+def _repo():
+    return _client().get_repo(f"{config.GITHUB_OWNER}/{config.GITHUB_REPO}")
 
 
 def open_pull_request(branch_name: str, title: str, body: str) -> tuple[int, str]:
