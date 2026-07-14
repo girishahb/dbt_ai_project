@@ -47,7 +47,7 @@ resource "aws_iam_role_policy" "agent_task_execution_secrets" {
       Resource = [
         aws_secretsmanager_secret.github_app_private_key.arn,
         aws_secretsmanager_secret.github_app_installation_id.arn,
-        aws_secretsmanager_secret.databricks_ci_token.arn,
+        aws_secretsmanager_secret.databricks_ci_client_secret.arn,
         aws_secretsmanager_secret.slack_webhook_url.arn,
       ]
     }]
@@ -57,8 +57,8 @@ resource "aws_iam_role_policy" "agent_task_execution_secrets" {
 # --- Task role: what the agent's own code (agent/) can do at runtime.
 # This is the guardrail-critical one -- see the plan's "Least-privilege
 # IAM/tokens" section. Notably absent: any S3/RDS/broad ecs/iam access, and
-# no Databricks *prod* write path (that's controlled by which Databricks
-# token is in the databricks_ci_token secret, not by AWS IAM).
+# no Databricks *prod* write path (that's controlled by which service
+# principal's OAuth secret is in databricks_ci_client_secret, not by AWS IAM).
 resource "aws_iam_role" "agent_task" {
   name = "${var.project_name}-task"
 
@@ -147,11 +147,12 @@ resource "aws_ecs_task_definition" "agent" {
         { name = "DBT_DATABRICKS_HTTP_PATH", value = var.databricks_http_path },
         { name = "DBT_DATABRICKS_CATALOG", value = var.databricks_catalog },
         { name = "DBT_DATABRICKS_CI_SCHEMA", value = var.databricks_ci_schema },
+        { name = "DBT_DATABRICKS_CI_CLIENT_ID", value = var.databricks_ci_client_id },
       ]
       secrets = [
         { name = "GITHUB_APP_PRIVATE_KEY", valueFrom = aws_secretsmanager_secret.github_app_private_key.arn },
         { name = "GITHUB_APP_INSTALLATION_ID", valueFrom = aws_secretsmanager_secret.github_app_installation_id.arn },
-        { name = "DBT_DATABRICKS_CI_TOKEN", valueFrom = aws_secretsmanager_secret.databricks_ci_token.arn },
+        { name = "DBT_DATABRICKS_CI_CLIENT_SECRET", valueFrom = aws_secretsmanager_secret.databricks_ci_client_secret.arn },
         { name = "SLACK_WEBHOOK_URL", valueFrom = aws_secretsmanager_secret.slack_webhook_url.arn },
       ]
       logConfiguration = {

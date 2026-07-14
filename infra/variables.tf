@@ -48,8 +48,8 @@ variable "security_group_ids" {
   type        = list(string)
 }
 
-# --- Databricks connection (non-secret connection details; the actual
-# token lives in Secrets Manager -- see secrets.tf / databricks_ci_token) ---
+# --- Databricks connection (non-secret connection details; the OAuth
+# client secret lives in Secrets Manager -- see secrets.tf / databricks_ci_client_secret) ---
 
 variable "databricks_host" {
   description = "Databricks workspace hostname, no https:// (matches DBT_DATABRICKS_HOST in profiles/profiles.yml)."
@@ -71,6 +71,11 @@ variable "databricks_ci_schema" {
   description = "Scratch schema the agent validates fixes in (matches DBT_DATABRICKS_CI_SCHEMA -- see profiles/profiles.yml ci target)."
   type        = string
   default     = "agent_ci"
+}
+
+variable "databricks_ci_client_id" {
+  description = "Application (client) id of the dedicated agent_ci* service principal used for OAuth M2M auth (matches DBT_DATABRICKS_CI_CLIENT_ID). Not sensitive on its own -- the paired secret lives in Secrets Manager."
+  type        = string
 }
 
 variable "github_app_id" {

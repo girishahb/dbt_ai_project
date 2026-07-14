@@ -86,6 +86,25 @@ jobs:
           -backend-config="region=${{ vars.TF_STATE_REGION }}"
           -backend-config="dynamodb_table=${{ vars.TF_STATE_LOCK_TABLE }}"
 
+      # None of these are secret (the actual credentials -- GitHub App private
+      # key, Databricks OAuth secret, Slack webhook -- live in Secrets Manager
+      # and are read directly by ecs.tf, never passed through Terraform vars).
+      # They mirror what a human would put in terraform.tfvars locally (see
+      # infra/terraform.tfvars.example), sourced from repo variables instead
+      # since terraform.tfvars itself is git-ignored. AGENT_SUBNET_IDS /
+      # AGENT_SECURITY_GROUP_IDS must be set as literal HCL list strings, e.g.
+      # ["subnet-aaa","subnet-bbb"], since those variables are list(string).
       - run: >
           terraform apply -auto-approve
           -var="agent_image_tag=${{ needs.build-and-push.outputs.image_tag }}"
+          -var="aws_region=${{ vars.AWS_REGION }}"
+          -var="mwaa_environment_name=${{ vars.MWAA_ENV_NAME }}"
+          -var="vpc_id=${{ vars.AGENT_VPC_ID }}"
+          -var='subnet_ids=${{ vars.AGENT_SUBNET_IDS }}'
+          -var='security_group_ids=${{ vars.AGENT_SECURITY_GROUP_IDS }}'
+          -var="databricks_host=${{ vars.DATABRICKS_HOST }}"
+          -var="databricks_http_path=${{ vars.DATABRICKS_HTTP_PATH }}"
+          -var="databricks_catalog=${{ vars.DATABRICKS_CATALOG }}"
+          -var="databricks_ci_schema=${{ vars.DBT_DATABRICKS_CI_SCHEMA }}"
+          -var="databricks_ci_client_id=${{ vars.DBT_DATABRICKS_CI_CLIENT_ID }}"
+          -var="github_app_id=${{ vars.SELF_HEAL_GITHUB_APP_ID }}"

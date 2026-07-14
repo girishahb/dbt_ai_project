@@ -27,20 +27,33 @@ this file is the practical "how do I actually turn this on" runbook.
      (Installation ID is in the URL when you view the installation, or via
      `GET /app/installations` with a JWT).
 
-3. **Create a scoped Databricks token for CI.** The `ci` target (`profiles/profiles.yml`)
-   only ever needs `CREATE`/`USE` on schemas matching `agent_ci*` in the configured catalog.
-   As a workspace admin, run once (adjust catalog name):
+3. **Create a scoped Databricks service principal for CI.** The `ci` target
+   (`profiles/profiles.yml`) authenticates via OAuth M2M (client id/secret), never a
+   shared PAT, and only ever needs privileges on schemas matching `agent_ci*` in the
+   configured catalog.
 
-   ```sql
-   CREATE SCHEMA IF NOT EXISTS ai_project.agent_ci;
-   -- If using a service principal instead of a personal token (recommended for the deployed agent):
-   GRANT USE CATALOG ON CATALOG ai_project TO `<service-principal-application-id>`;
-   GRANT CREATE SCHEMA, USE SCHEMA ON CATALOG ai_project TO `<service-principal-application-id>`;
-   ```
+   - Databricks admin console -> Identity and access -> Service principals -> Add
+     service principal (e.g. `dbt-self-heal-ci`). Note its **Application id** (client id).
+   - Generate an OAuth secret for it (Secrets tab -> Generate secret) -- shown once, save it.
+   - Grant it warehouse access: the SQL warehouse's Permissions tab -> add the service
+     principal with **Can use**.
+   - As a workspace admin, run once via a SQL warehouse (adjust catalog name and
+     the application id):
 
-   Generate a token/OAuth secret for that principal -- this is what goes in the
-   `databricks_ci_token` secret below. It should have no grants on the `silver`/`gold`
-   schemas themselves.
+     ```sql
+     CREATE SCHEMA IF NOT EXISTS ai_project.agent_ci_silver;
+     CREATE SCHEMA IF NOT EXISTS ai_project.agent_ci_gold;
+     GRANT USE CATALOG ON CATALOG ai_project TO `<service-principal-application-id>`;
+     GRANT CREATE SCHEMA, USE SCHEMA ON CATALOG ai_project TO `<service-principal-application-id>`;
+     GRANT ALL PRIVILEGES ON SCHEMA ai_project.agent_ci_silver TO `<service-principal-application-id>`;
+     GRANT ALL PRIVILEGES ON SCHEMA ai_project.agent_ci_gold TO `<service-principal-application-id>`;
+     GRANT USE SCHEMA, SELECT ON SCHEMA ai_project.<bronze_schema> TO `<service-principal-application-id>`;
+     ```
+
+     The last grant is read-only access to whatever schema the bronze sources
+     (`models/sources.yml`) actually live in, so the `ci` target can still resolve
+     upstream data via `source()`. It should have **no** grants on the real
+     `silver`/`gold` schemas themselves.
 
 4. **Create a Slack incoming webhook** (or swap `tools/slack.py` for another notifier).
 
@@ -50,9 +63,13 @@ this file is the practical "how do I actually turn this on" runbook.
    ```powershell
    aws secretsmanager put-secret-value --secret-id dbt-self-heal/github-app-private-key --secret-string (Get-Content -Raw path\to\key.pem)
    aws secretsmanager put-secret-value --secret-id dbt-self-heal/github-app-installation-id --secret-string "<installation-id>"
-   aws secretsmanager put-secret-value --secret-id dbt-self-heal/databricks-ci-token --secret-string "<token>"
+   aws secretsmanager put-secret-value --secret-id dbt-self-heal/databricks-ci-client-secret --secret-string "<oauth-secret>"
    aws secretsmanager put-secret-value --secret-id dbt-self-heal/slack-webhook-url --secret-string "<webhook-url>"
    ```
+
+   The service principal's **client id** is not a secret -- it goes in
+   `terraform.tfvars` as `databricks_ci_client_id` (and from there into the ECS task
+   definition as a plain env var), not into Secrets Manager.
 
 6. **Branch protection on `main`:** GitHub repo Settings -> Branches -> add a rule for
    `main` requiring the `dbt-build` status check (from `.github/workflows/dbt_ci.yml`)
@@ -87,7 +104,7 @@ whole `main.py` entrypoint. Two useful entry points:
 | Guardrail | Where enforced |
 |---|---|
 | Never write outside `models/` | `tools/repo_tools.py::_resolve_and_check` (code, not prompt) |
-| Never run against prod Databricks | `macros/get_custom_schema.sql` (schema isolation) + separate `databricks_ci_token` |
+| Never run against prod Databricks | `macros/get_custom_schema.sql` (schema isolation) + separate `databricks_ci_client_secret` service principal |
 | Bounded fix retries | `graph.py::route_validation` + `config.MAX_FIX_RETRIES` |
 | Auto-merge only for small, known-safe diffs | `nodes/risk_gate.py` + `config.LOW_RISK_*` |
 | Required CI check is a hard backstop | `nodes/open_pr_and_merge.py` calls GitHub, doesn't trust its own risk_gate alone |

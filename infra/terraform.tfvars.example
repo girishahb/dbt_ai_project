@@ -8,10 +8,11 @@ vpc_id              = "vpc-xxxxxxxx"          # same VPC as the MWAA environment
 subnet_ids          = ["subnet-xxxxxxxx"]     # needs outbound internet (NAT or public+assign_public_ip)
 security_group_ids  = ["sg-xxxxxxxx"]         # must allow outbound HTTPS
 
-databricks_host       = "dbc-xxxxxxxx-xxxx.cloud.databricks.com"
-databricks_http_path  = "/sql/1.0/warehouses/xxxxxxxxxxxxxxxx"
-databricks_catalog    = "ai_project"
-databricks_ci_schema  = "agent_ci"
+databricks_host          = "dbc-xxxxxxxx-xxxx.cloud.databricks.com"
+databricks_http_path     = "/sql/1.0/warehouses/xxxxxxxxxxxxxxxx"
+databricks_catalog       = "ai_project"
+databricks_ci_schema     = "agent_ci"
+databricks_ci_client_id  = "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"  # agent_ci* service principal's Application id
 
 github_app_id = "123456"
 

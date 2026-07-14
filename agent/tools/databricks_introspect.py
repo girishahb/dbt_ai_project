@@ -9,13 +9,27 @@ from __future__ import annotations
 import os
 
 from databricks import sql
+from databricks.sdk.core import Config
 
 
 def _connect():
+    # OAuth M2M via the scoped agent_ci* service principal (profiles/profiles.yml
+    # ci target uses the same auth) -- never the prod PAT.
+    host = os.environ["DBT_DATABRICKS_HOST"]
+    config = Config(
+        host=f"https://{host}",
+        client_id=os.environ["DBT_DATABRICKS_CI_CLIENT_ID"],
+        client_secret=os.environ["DBT_DATABRICKS_CI_CLIENT_SECRET"],
+        auth_type="oauth-m2m",
+    )
+
+    def credentials_provider():
+        return lambda: config.authenticate()
+
     return sql.connect(
-        server_hostname=os.environ["DBT_DATABRICKS_HOST"],
+        server_hostname=host,
         http_path=os.environ["DBT_DATABRICKS_HTTP_PATH"],
-        access_token=os.environ.get("DBT_DATABRICKS_CI_TOKEN") or os.environ["DBT_DATABRICKS_TOKEN"],
+        credentials_provider=credentials_provider,
     )
 
 

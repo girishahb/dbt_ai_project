@@ -16,9 +16,9 @@ resource "aws_secretsmanager_secret" "github_app_installation_id" {
   description = "Installation id of the GitHub App on ${var.github_owner}/${var.github_repo}."
 }
 
-resource "aws_secretsmanager_secret" "databricks_ci_token" {
-  name        = "${var.project_name}/databricks-ci-token"
-  description = "Databricks token/service principal scoped to the agent_ci_* schemas only (see profiles/profiles.yml ci target)."
+resource "aws_secretsmanager_secret" "databricks_ci_client_secret" {
+  name        = "${var.project_name}/databricks-ci-client-secret"
+  description = "OAuth M2M client secret for the service principal scoped to agent_ci_* schemas only (see profiles/profiles.yml ci target). Client id itself lives in var.databricks_ci_client_id -- not sensitive."
 }
 
 resource "aws_secretsmanager_secret" "slack_webhook_url" {

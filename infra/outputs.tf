@@ -7,7 +7,7 @@ output "secrets_to_populate" {
   value = [
     aws_secretsmanager_secret.github_app_private_key.name,
     aws_secretsmanager_secret.github_app_installation_id.name,
-    aws_secretsmanager_secret.databricks_ci_token.name,
+    aws_secretsmanager_secret.databricks_ci_client_secret.name,
     aws_secretsmanager_secret.slack_webhook_url.name,
   ]
 }
