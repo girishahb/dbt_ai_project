@@ -1,0 +1,29 @@
+flowchart TB
+    subgraph infra["infra/ (Terraform root)"]
+        DDB["aws_dynamodb_table<br/>dbt-self-heal-attempts"]
+        SEC1["aws_secretsmanager_secret<br/>github-app-private-key"]
+        SEC2["aws_secretsmanager_secret<br/>github-app-installation-id"]
+        SEC3["aws_secretsmanager_secret<br/>databricks-ci-client-secret"]
+        SEC4["aws_secretsmanager_secret<br/>slack-webhook-url"]
+        RULE["aws_cloudwatch_event_rule<br/>dbt-self-heal-dbt-task-failed"]
+        LAM["aws_lambda_function<br/>dbt-self-heal-dispatcher"]
+        ECR["aws_ecr_repository<br/>dbt-self-heal-agent"]
+        CLUSTER["aws_ecs_cluster<br/>dbt-self-heal-cluster"]
+        TASKDEF["aws_ecs_task_definition<br/>dbt-self-heal-agent"]
+        ROLE_TASK["aws_iam_role<br/>dbt-self-heal-task"]
+        ROLE_EXEC["aws_iam_role<br/>dbt-self-heal-task-execution"]
+        ROLE_LAM["aws_iam_role<br/>dbt-self-heal-dispatcher"]
+    end
+
+    RULE --> LAM
+    LAM --> ROLE_LAM
+    LAM -.RunTask.-> TASKDEF
+    TASKDEF --> ECR
+    TASKDEF --> ROLE_TASK
+    TASKDEF --> ROLE_EXEC
+    ROLE_EXEC -.reads.-> SEC1
+    ROLE_EXEC -.reads.-> SEC2
+    ROLE_EXEC -.reads.-> SEC3
+    ROLE_EXEC -.reads.-> SEC4
+    LAM -.claims.-> DDB
+    LAM -.reads.-> SEC4

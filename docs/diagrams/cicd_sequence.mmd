@@ -1,0 +1,17 @@
+sequenceDiagram
+    participant Dev as Human PR
+    participant GH as GitHub
+    participant CI as dbt_ci.yml
+    participant Main as main branch
+    participant MWAAd as deploy-mwaa.yml
+    participant Agentd as deploy-agent.yml
+    participant AWS as AWS
+
+    Dev->>GH: open PR (models/**)
+    GH->>CI: run dbt build --target ci
+    CI-->>GH: check "dbt-build" = success
+    GH->>Main: merge (required check passed)
+    Main->>MWAAd: push triggers sync
+    MWAAd->>AWS: s3 sync dags/ + models/ to MWAA bucket
+    Main->>Agentd: push triggers (only if agent/dispatcher/infra changed)
+    Agentd->>AWS: docker push + terraform apply (needs manual approval)

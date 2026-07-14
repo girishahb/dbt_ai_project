@@ -1,0 +1,26 @@
+stateDiagram-v2
+    [*] --> fetch_logs
+    fetch_logs --> classify_error
+
+    classify_error --> introspect_schema: fixable<br/>(missing_column, compile_error)
+    classify_error --> escalate: not_fixable<br/>(data_quality, unknown)
+
+    introspect_schema --> propose_fix
+    propose_fix --> apply_fix
+    apply_fix --> validate_fix
+
+    validate_fix --> risk_gate: pass
+    validate_fix --> propose_fix: retry<br/>(retry_count < MAX_FIX_RETRIES)
+    validate_fix --> escalate: exhausted retries
+
+    risk_gate --> open_pr_and_merge: low_risk
+    risk_gate --> open_pr_and_label: needs_review
+
+    open_pr_and_merge --> retrigger_dag
+    retrigger_dag --> notify_success: DAG re-run succeeded
+    retrigger_dag --> revert_and_escalate: DAG re-run failed again
+
+    open_pr_and_label --> [*]
+    notify_success --> [*]
+    escalate --> [*]
+    revert_and_escalate --> [*]

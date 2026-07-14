@@ -1,0 +1,29 @@
+flowchart TD
+    subgraph MWAA["Amazon MWAA (Airflow)"]
+        DAG[dbt_silver / dbt_gold DAG] -->|task fails| CB[on_failure_callback<br/>dags/dbt_common.py]
+    end
+
+    CB -->|PutEvents<br/>source=airflow.dbt<br/>detail-type=DbtTaskFailed| EB[(EventBridge<br/>default bus)]
+    EB -->|rule: dbt-self-heal-dbt-task-failed| L[Dispatcher Lambda<br/>dbt-self-heal-dispatcher]
+
+    L -->|claim attempt_key<br/>dag+task+date| DDB[(DynamoDB<br/>circuit breaker<br/>dbt-self-heal-attempts)]
+    DDB -->|already claimed today| SlackSkip[Slack: skipped, needs human]
+    DDB -->|first attempt today| RunTask[ecs RunTask]
+
+    RunTask --> Agent["Fargate task: LangGraph agent<br/>dbt-self-heal-agent"]
+
+    Agent -->|reads| Airflow2[MWAA REST API / CloudWatch Logs]
+    Agent -->|reads schema| DBX[(Databricks<br/>Unity Catalog)]
+    Agent -->|writes candidate fix, opens PR| GH[GitHub repo]
+    Agent -->|validates fix| CI[ci Databricks target<br/>agent_ci_* schemas]
+
+    GH -->|dbt-build required check| PRCheck{dbt CI green?}
+    PRCheck -->|yes, low risk| AutoMerge[Auto-merge to main]
+    PRCheck -->|no / needs review| HumanReview[Label needs-human-review]
+
+    AutoMerge --> Deploy[deploy-mwaa.yml<br/>syncs DAGs to S3]
+    Deploy --> Retrigger[Agent retriggers the DAG]
+    Retrigger -->|succeeds| SlackOK[Slack: fixed + verified]
+    Retrigger -->|fails again| Revert[Revert commit + escalate]
+
+    Agent -->|Slack notifications throughout| Slack[(Slack webhook)]

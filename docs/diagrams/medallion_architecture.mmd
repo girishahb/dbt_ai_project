@@ -1,0 +1,10 @@
+flowchart LR
+    subgraph UC["Databricks Unity Catalog: ai_project"]
+        direction LR
+        B[("Bronze<br/>ai_project.default<br/>raw source tables")]
+        S[("Silver<br/>ai_project.silver<br/>cleaned, validated")]
+        G[("Gold<br/>ai_project.gold<br/>business marts")]
+        B -- "dbt run --select silver" --> S
+        S -- "dbt run --select gold" --> G
+    end
+    BI[BI tools / analysts] --> G

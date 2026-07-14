@@ -1,6 +1,37 @@
 # dbt_ai_project
 
-A [dbt](https://www.getdbt.com/) project configured to run against Databricks (Unity Catalog / SQL Warehouse) using [`dbt-databricks`](https://github.com/databricks/dbt-databricks).
+A [dbt](https://www.getdbt.com/) medallion-architecture project running against Databricks
+(Unity Catalog / SQL Warehouse), orchestrated by Amazon MWAA (Airflow) — with a
+**self-healing agent** that automatically diagnoses, fixes, and verifies the
+mechanical class of pipeline failures (missing/renamed columns, broken
+`ref()`/`source()` calls, simple compile errors) end to end, from an Airflow
+DAG failure to a merged, re-verified fix on `main`, with no human in the loop
+for the safe cases and a clean handoff to a human for everything else.
+
+```mermaid
+flowchart LR
+    A["Airflow DAG<br/>task fails"] --> B["EventBridge +<br/>dispatcher Lambda"]
+    B --> C["LangGraph agent<br/>(Fargate)"]
+    C -->|diagnose + fix + validate| D["Open PR"]
+    D -->|dbt-build check green<br/>+ low risk| E["Auto-merge to main"]
+    E --> F["Re-run the DAG"]
+    F -->|success| G["Slack: fixed ✅"]
+    F -->|fails again| H["Revert + escalate to human"]
+```
+
+## Documentation
+
+| Doc | What's in it |
+| --- | --- |
+| [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) | Full system design, diagrams for every hop, the LangGraph state machine, guardrails, IAM/credential model |
+| [`docs/SETUP.md`](./docs/SETUP.md) | Complete copy-pasteable runbook to build this whole system from zero in a fresh account |
+| [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) | Running the end-to-end test, watching a live run, resetting the circuit breaker, rotating secrets, troubleshooting every error hit while building this |
+| [`docs/CONCEPTS.md`](./docs/CONCEPTS.md) | Plain-language explanations of every non-obvious concept used (LangGraph/ReAct, OIDC, OAuth M2M, circuit breaker, medallion architecture, ...) |
+| [`agent/README.md`](./agent/README.md) | Agent code map + one-time setup checklist (component-level detail) |
+| [`infra/README.md`](./infra/README.md) | Terraform mechanics: remote state bootstrap, required repo variables |
+
+The rest of this file covers the **dbt project itself** — the pipeline the
+agent protects, not the agent.
 
 ## Prerequisites
 
@@ -118,6 +149,20 @@ dbt run --project-dir . --profiles-dir .\profiles --select gold --target prod
 ```
 
 These are exactly the commands the DAGs run under the hood (both verified against Databricks while building this).
+
+## Self-healing agent
+
+`agent/`, `dispatcher/`, and `infra/` implement the automated failure-recovery
+system diagrammed above — see [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
+for the full design and [`docs/SETUP.md`](./docs/SETUP.md) to build your own.
+In short: an `on_failure_callback` on every dbt task (`dags/dbt_common.py`)
+publishes an EventBridge event on failure, a dispatcher Lambda starts a
+LangGraph agent on Fargate (guarded by a per-day circuit breaker), the agent
+diagnoses the dbt error against the real Airflow log and Databricks schema,
+proposes and validates a fix against an isolated `ci` target
+(`profiles/profiles.yml`), opens a PR, and — only if the same `dbt-build`
+check that gates human PRs passes and the diff is small/well-understood —
+auto-merges and re-runs the DAG to confirm the fix actually worked.
 
 ## Useful commands
 
