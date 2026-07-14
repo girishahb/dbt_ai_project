@@ -107,7 +107,7 @@ resource "aws_iam_role_policy" "agent_task" {
         Sid      = "ReadMwaaTaskLogsFallback"
         Effect   = "Allow"
         Action   = ["logs:DescribeLogStreams", "logs:GetLogEvents"]
-        Resource = "arn:aws:logs:${var.aws_region}:*:log-group:airflow-${var.mwaa_environment_name}-task:*"
+        Resource = "arn:aws:logs:${var.aws_region}:*:log-group:airflow-${var.mwaa_environment_name}-Task:*"
       },
       {
         Sid      = "CircuitBreakerReadWrite"

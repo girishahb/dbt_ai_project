@@ -12,7 +12,7 @@ REST call.
 Falls back to scanning CloudWatch Logs directly for `fetch_task_log` if the
 REST call fails for any reason (e.g. log already rotated out of the
 webserver's view) -- MWAA ships every task log to a
-`airflow-<environment>-task` log group as well, so the log text is
+`airflow-<environment>-Task` log group as well, so the log text is
 recoverable even then.
 """
 from __future__ import annotations
@@ -75,7 +75,7 @@ class MwaaClient:
     def _fetch_task_log_from_cloudwatch(
         self, dag_id: str, run_id: str, task_id: str, try_number: int
     ) -> str:
-        log_group = f"airflow-{self.environment_name}-task"
+        log_group = f"airflow-{self.environment_name}-Task"
         # Default MWAA/Airflow 2.x log filename template:
         # dag_id={dag}/run_id={run}/task_id={task}/attempt={try}.log
         cw_run_id = _cloudwatch_run_id(run_id)
