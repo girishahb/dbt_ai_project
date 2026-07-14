@@ -86,9 +86,9 @@ variable "github_app_id" {
 # --- Bedrock ------------------------------------------------------------
 
 variable "bedrock_model_id" {
-  description = "Bedrock model id the agent calls for classification/fix-proposal (must have model access enabled in the Bedrock console first)."
+  description = "Bedrock model id the agent calls for classification/fix-proposal. Claude Sonnet 4.5 only supports on-demand invocation through a cross-region inference profile, not the bare model id -- see `aws bedrock list-inference-profiles` (must have model access enabled in the Bedrock console first)."
   type        = string
-  default     = "anthropic.claude-sonnet-4-5-20250929-v1:0"
+  default     = "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 }
 
 # --- Circuit breaker ------------------------------------------------------
