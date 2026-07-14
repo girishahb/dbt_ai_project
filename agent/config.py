@@ -26,7 +26,7 @@ MWAA_ENVIRONMENT_NAME = os.environ.get("MWAA_ENVIRONMENT_NAME", "")
 
 # --- Bedrock ---
 BEDROCK_MODEL_ID = os.environ.get(
-    "BEDROCK_MODEL_ID", "anthropic.claude-sonnet-4-5-20250929-v1:0"
+    "BEDROCK_MODEL_ID", "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 )
 BEDROCK_REGION = os.environ.get("AWS_REGION", "us-east-1")
 

@@ -80,10 +80,19 @@ resource "aws_iam_role_policy" "agent_task" {
     Version = "2012-10-17"
     Statement = [
       {
-        Sid      = "InvokeBedrock"
-        Effect   = "Allow"
-        Action   = ["bedrock:InvokeModel"]
-        Resource = "arn:aws:bedrock:${var.aws_region}::foundation-model/*"
+        # Claude Sonnet 4.5 only supports on-demand invocation through a
+        # cross-region inference profile (var.bedrock_model_id defaults to
+        # "us.anthropic...", not the bare model id) -- which in turn routes
+        # the request to whichever US region has capacity, so both the
+        # inference-profile resource itself and foundation-model in every US
+        # region it might route to need to be allowed.
+        Sid    = "InvokeBedrock"
+        Effect = "Allow"
+        Action = ["bedrock:InvokeModel"]
+        Resource = [
+          "arn:aws:bedrock:*::foundation-model/*",
+          "arn:aws:bedrock:${var.aws_region}:*:inference-profile/*",
+        ]
       },
       {
         Sid    = "ReadMwaaLogsAndTriggerRuns"
