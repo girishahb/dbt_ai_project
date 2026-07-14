@@ -1,5 +1,7 @@
 import os
 
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 
 from agent import config
@@ -31,17 +33,23 @@ def classify_error(state: SelfHealState) -> dict:
         f"models/gold/{f}" for f in os.listdir(os.path.join(repo_path, "models", "gold")) if f.endswith(".sql")
     )
 
-    llm = get_model().with_structured_output(ErrorClassification)
-    result: ErrorClassification = llm.invoke(
-        [
-            (
-                "system",
-                "You are diagnosing a failed Airflow task that ran `dbt run`/`dbt test` "
-                "for a Databricks medallion (silver/gold) dbt project. Read the task log "
-                "and classify the failure. Existing model files in this project:\n" + model_files,
-            ),
-            ("user", f"Airflow task log (tail):\n\n{state['log_text']}"),
-        ]
+    parser = PydanticOutputParser(pydantic_object=ErrorClassification)
+    result: ErrorClassification = parser.parse(
+        get_model().invoke(
+            [
+                SystemMessage(
+                    content=(
+                        "You are diagnosing a failed Airflow task that ran `dbt run`/`dbt test` "
+                        "for a Databricks medallion (silver/gold) dbt project. Read the task log "
+                        "and classify the failure. Existing model files in this project:\n"
+                        + model_files
+                        + "\n\n"
+                        + parser.get_format_instructions()
+                    )
+                ),
+                HumanMessage(content=f"Airflow task log (tail):\n\n{state['log_text']}"),
+            ]
+        ).content
     )
 
     return {
