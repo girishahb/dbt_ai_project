@@ -26,7 +26,8 @@ cleaned as (
             when lower(trim(gender)) in ('male', 'm') then 'Male'
             else 'Unknown'
         end as gender,
-        customer_loyalty_score
+        customer_loyalty_score,
+        this_column_does_not_exist
     from source
     where customerID is not null
 
