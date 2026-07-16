@@ -1,0 +1,8 @@
+.terraform/
+infra/.build/
+profiles/
+.env
+__pycache__/
+*.pyc
+node_modules/
+graphify-out/cache/

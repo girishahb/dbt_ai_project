@@ -1,0 +1,20 @@
+{
+  "0": "SelfHealState",
+  "1": "Setup: building this from zero",
+  "2": "dbt_ai_project",
+  "3": "github_client.py",
+  "4": "Troubleshooting a failed deploy-agent.yml run",
+  "5": "repo_tools.py",
+  "6": "Concepts",
+  "7": "dbt_common.py",
+  "8": "Architecture",
+  "9": "MwaaClient",
+  "10": "introspect_schema.py",
+  "11": "validate_fix.py",
+  "12": "handler.py",
+  "13": "startup.sh",
+  "14": "__init__.py",
+  "15": "__init__.py",
+  "16": "__init__.py",
+  "17": "explore_schema.py"
+}

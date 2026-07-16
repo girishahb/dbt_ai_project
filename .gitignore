@@ -19,3 +19,6 @@ infra/tfplan
 infra/terraform.tfvars
 infra/.build/
 
+# Graphify rebuild cache (commit graphify-out/ report + graph, not AST cache)
+graphify-out/cache/
+
